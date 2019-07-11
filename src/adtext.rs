@@ -54,7 +54,7 @@ fn main() {
     for (name, s) in &EXAMPLES[..] {
         let utf8len = s.as_bytes().len();
         let utf16len = s.encode_utf16().count()*2;
-        let compressed = compress(s).unwrap();
+        let compressed = compress(s);
 
         assert_eq!(*s, decompress(compressed.as_slice()).as_str());
 
@@ -63,12 +63,12 @@ fn main() {
     }
 }
 
-pub fn compress (s: &str) -> Result<Vec<u8>, io::Error> {
+pub fn compress (s: &str) -> Vec<u8> {
     let mut compressor = snap::Writer::new(Vec::new());
     for utf16 in s.encode_utf16() {
-        compressor.write_u16::<BigEndian>(utf16)?;
+        compressor.write_u16::<BigEndian>(utf16).unwrap();
     }
-    Ok(compressor.into_inner().unwrap())
+    compressor.into_inner().unwrap()
 }
 
 pub fn decompress (d: &[u8]) -> String {
