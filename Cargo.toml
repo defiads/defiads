@@ -1,0 +1,13 @@
+[package]
+name = "biadne"
+version = "0.1.0"
+authors = ["Tamas Blummer <tamas.blummer@gmail.com>"]
+edition = "2018"
+
+[[bin]]
+name = "adtext"
+path = "src/adtext.rs"
+
+[dependencies]
+snap = "0.2"
+byteorder = "1"
