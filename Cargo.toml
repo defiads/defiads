@@ -11,6 +11,7 @@ serde = "1"
 serde_derive = "1"
 serde_cbor = "0.10"
 bitcoin_hashes="0.4"
+rand = "0.7"
 
 [dev-dependencies]
 hex="0.3"
