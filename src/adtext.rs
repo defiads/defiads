@@ -46,7 +46,7 @@ Qθο σολεατ γραεcι μολλισ νο. Εα ιθσ ομνισ λθcι
 extern crate snap;
 extern crate byteorder;
 
-use std::io;
+use std::io::{self, Write, Read};
 
 use byteorder::{BigEndian, WriteBytesExt, ReadBytesExt};
 
@@ -54,16 +54,18 @@ fn main() {
     for (name, s) in &EXAMPLES[..] {
         let utf8len = s.as_bytes().len();
         let utf16len = s.encode_utf16().count()*2;
-        let compressed = compress(s);
+        let utf16compressed = utf16compress(s);
+        let utf8compressed = utf8compress(s);
 
-        assert_eq!(*s, decompress(compressed.as_slice()).as_str());
+        assert_eq!(*s, utf16decompress(utf16compressed.as_slice()).as_str());
+        assert_eq!(*s, utf8decompress(utf8compressed.as_slice()).as_str());
 
-        println!("{:20} UTF-8: {:4}\tUTF-16: {:4}\t\tsnappy(UTF-16): {:4}\tvs. UTF-8: {:4.1} %",
-                 *name, utf8len, utf16len, compressed.len(), 100.0 * (compressed.len() as f32/utf8len as f32));
+        println!("{:20} UTF-8: {:4}\tsnappy(UTF-8): {:4}\tUTF-16: {:4}\tsnappy(UTF-16): {:4}\t",
+                 *name, utf8len, utf8compressed.len(), utf16len, utf16compressed.len());
     }
 }
 
-pub fn compress (s: &str) -> Vec<u8> {
+pub fn utf16compress(s: &str) -> Vec<u8> {
     let mut compressor = snap::Writer::new(Vec::new());
     for utf16 in s.encode_utf16() {
         compressor.write_u16::<BigEndian>(utf16).unwrap();
@@ -71,7 +73,7 @@ pub fn compress (s: &str) -> Vec<u8> {
     compressor.into_inner().unwrap()
 }
 
-pub fn decompress (d: &[u8]) -> String {
+pub fn utf16decompress(d: &[u8]) -> String {
     let mut decompressor = snap::Reader::new(io::Cursor::new(d));
     let mut u = Vec::new();
     while let Ok(utf16) = decompressor.read_u16::<BigEndian>() {
@@ -80,3 +82,15 @@ pub fn decompress (d: &[u8]) -> String {
     String::from_utf16(u.as_slice()).unwrap()
 }
 
+pub fn utf8compress(s: &str) -> Vec<u8> {
+    let mut compressor = snap::Writer::new(Vec::new());
+    compressor.write(s.as_bytes()).unwrap();
+    compressor.into_inner().unwrap()
+}
+
+pub fn utf8decompress(d: &[u8]) -> String {
+    let mut decompressor = snap::Reader::new(io::Cursor::new(d));
+    let mut buffer = String::new();
+    decompressor.read_to_string(&mut buffer).unwrap();
+    buffer
+}
