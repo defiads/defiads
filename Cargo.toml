@@ -7,3 +7,10 @@ edition = "2018"
 [dependencies]
 snap = "0.2"
 byteorder = "1"
+serde = "1"
+serde_derive = "1"
+serde_cbor = "0.10"
+bitcoin_hashes="0.4"
+
+[dev-dependencies]
+hex="0.3"

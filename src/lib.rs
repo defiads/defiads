@@ -9,5 +9,12 @@
 
 extern crate snap;
 extern crate byteorder;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+#[cfg(test)]
+extern crate hex;
+extern crate bitcoin_hashes;
 
 mod text;
+mod ad;

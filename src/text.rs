@@ -3,10 +3,12 @@
 use std::error::Error;
 use std::io::{self, Write, Read, Cursor};
 use byteorder::{LittleEndian, WriteBytesExt, ReadBytesExt};
+use serde::{Serialize, Deserialize};
 
 /// A text object that stores a string in space saving encoding
 /// currently UTF-8 or UTF-16 with or without snappy compression
-struct Text {
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+pub struct Text {
     encoded: Vec<u8>
 }
 
