@@ -95,7 +95,7 @@ impl IBLT {
             let ref ob = other.buckets[i];
             b.keyhash = sb.keyhash ^ ob.keyhash;
             for (j, c) in b.keysum.iter_mut().enumerate() {
-                *c ^= sb.keysum[j] ^ ob.keysum[j];
+                *c = sb.keysum[j] ^ ob.keysum[j];
             }
             b.counter = sb.counter - ob.counter;
         }
