@@ -48,7 +48,7 @@ impl IBLT {
         let mut hash = self.k0;
         for _ in 0..self.k {
             hash = Self::hash(hash, self.k1, id);
-            let n = (hash % self.buckets.len() as u64) as usize;
+            let n = IBLT::fast_reduce(hash, self.buckets.len());
             let ref mut bucket = self.buckets[n];
             for i in 0..id.len () {
                 bucket.keysum[i] ^= id[i];
@@ -65,7 +65,7 @@ impl IBLT {
         let mut hash = self.k0;
         for _ in 0..self.k {
             hash = Self::hash(hash, self.k1, id);
-            let n = (hash % self.buckets.len() as u64) as usize;
+            let n = IBLT::fast_reduce(hash, self.buckets.len());
             let ref mut bucket = self.buckets[n];
             for i in 0..id.len () {
                 bucket.keysum[i] ^= id[i];
@@ -94,6 +94,9 @@ impl IBLT {
         Ok(copy.into_iter(false))
     }
 
+    fn fast_reduce (n: u64, r: usize) -> usize {
+        ((n as u128 * r as u128) >> 64) as usize
+    }
 }
 
 #[derive(Debug)]
@@ -146,7 +149,7 @@ impl Iterator for IBLTIterator {
                 let mut hash = self.iblt.k0;
                 for _ in 0..self.iblt.k {
                     hash = IBLT::hash(hash, self.iblt.k1, &id[..]);
-                    let n = (hash % self.iblt.buckets.len() as u64) as usize;
+                    let n = IBLT::fast_reduce(hash, self.iblt.buckets.len());
                     let ref mut bucket = self.iblt.buckets[n];
                     for i in 0..id.len () {
                         bucket.keysum[i] ^= id[i];
