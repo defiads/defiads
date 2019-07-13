@@ -1,4 +1,4 @@
-//! Invertible Bloom Lookup Table
+//! Iterable Bloom Lookup Table
 //! see: https://dash.harvard.edu/bitstream/handle/1/14398536/GENTILI-SENIORTHESIS-2015.pdf
 
 use std::collections::vec_deque::VecDeque;
@@ -22,7 +22,7 @@ pub struct IBLT {
 struct Bucket {
     keysum: [u8; ID_LEN],
     keyhash: u64,
-    counter: i64
+    counter: i32
 }
 
 impl IBLT {
@@ -97,7 +97,7 @@ impl IBLT {
 pub struct IBLTIterator {
     iblt: IBLT,
     queue: VecDeque<usize>,
-    one: i64
+    one: i32
 }
 
 impl IBLTIterator {
