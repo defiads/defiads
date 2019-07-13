@@ -7,7 +7,6 @@ use std::error::Error;
 use std::fmt;
 
 use bitcoin_hashes::siphash24;
-use rand::{RngCore, thread_rng};
 use byteorder::{WriteBytesExt, BigEndian};
 
 const ID_LEN:usize = 32;
@@ -30,9 +29,8 @@ struct Bucket {
 impl IBLT {
 
     /// Create a new IBLT with m buckets and k hash functions
-    pub fn new (m: usize, k: u8) -> IBLT {
-        let mut rnd = thread_rng();
-        IBLT{buckets: vec![Bucket::default();m], k0: rnd.next_u64(), k1: rnd.next_u64(), k}
+    pub fn new (m: usize, k: u8, k0: u64, k1: u64) -> IBLT {
+        IBLT{buckets: vec![Bucket::default();m], k0, k1, k}
     }
 
     fn hash (k0: u64, k1: u64, id: &[u8]) -> u64 {
@@ -85,13 +83,23 @@ impl IBLT {
         IBLTIterator::new(self, added)
     }
 
-    /// return an itartor of ids missing in this one but is itarable from the other IBLT
-    pub fn missing (&mut self, other: &mut IBLTIterator) -> Result<IBLTIterator, IBLTError> {
-        let mut copy = self.clone();
-        for id in other {
-            copy.delete(&id?[..]);
+    /// substract an other IBLT from this and return the result
+    pub fn substract (self, other: IBLT) -> IBLT  {
+        assert_eq!(self.buckets.len(), other.buckets.len());
+        assert_eq!(self.k0, other.k0);
+        assert_eq!(self.k1, other.k1);
+        assert_eq!(self.k, other.k);
+        let mut buckets = vec![Bucket::default(); self.buckets.len()];
+        for (i, b) in buckets.iter_mut().enumerate() {
+            let ref sb = self.buckets[i];
+            let ref ob = other.buckets[i];
+            b.keyhash = sb.keyhash ^ ob.keyhash;
+            for (j, c) in b.keysum.iter_mut().enumerate() {
+                *c ^= sb.keysum[j] ^ ob.keysum[j];
+            }
+            b.counter = sb.counter - ob.counter;
         }
-        Ok(copy.into_iter(false))
+        IBLT{buckets, k0: self.k0, k1: self.k1, k: self.k}
     }
 
     pub fn is_overloaded (&self) -> bool {
@@ -123,7 +131,8 @@ impl fmt::Display for IBLTError {
 pub struct IBLTIterator {
     iblt: IBLT,
     queue: VecDeque<usize>,
-    one: i32
+    one: i32,
+    incomplete: bool
 }
 
 impl IBLTIterator {
@@ -136,7 +145,7 @@ impl IBLTIterator {
                 queue.push_back(i);
             }
         }
-        IBLTIterator{iblt, queue, one}
+        IBLTIterator{iblt, queue, one, incomplete: false}
     }
 }
 
@@ -144,6 +153,9 @@ impl Iterator for IBLTIterator {
     type Item = Result<[u8; ID_LEN], IBLTError>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.incomplete {
+            return None;
+        }
         while let Some(i) = self.queue.pop_front() {
             let c = self.iblt.buckets[i].counter;
             if c.abs() == 1 {
@@ -172,6 +184,7 @@ impl Iterator for IBLTIterator {
         }
         for bucket in &self.iblt.buckets {
             if bucket.counter != 0  {
+                self.incomplete = true;
                 return Some(Err(IBLTError::IncompleteIteration));
             }
         }
@@ -186,7 +199,7 @@ mod test {
 
     #[test]
     pub fn test_single_insert () {
-        let mut a = IBLT::new(10, 3);
+        let mut a = IBLT::new(10, 3, 0, 0);
 
         a.insert(&[1; ID_LEN]);
         assert_eq!(a.iter(true).next().unwrap().unwrap(), [1; ID_LEN]);
@@ -194,7 +207,7 @@ mod test {
 
     #[test]
     pub fn test_single_insert_delete () {
-        let mut a = IBLT::new(10, 3);
+        let mut a = IBLT::new(10, 3, 0, 0);
 
         a.insert(&[1; ID_LEN]);
         a.delete(&[1; ID_LEN]);
@@ -203,7 +216,7 @@ mod test {
 
     #[test]
     pub fn test_few_inserts () {
-        let mut a = IBLT::new(1000, 3);
+        let mut a = IBLT::new(1000, 3, 0, 0);
 
         let mut set = HashSet::new();
         for i in 0..20 {
@@ -219,7 +232,7 @@ mod test {
 
     #[test]
     pub fn test_few_inserts_deletes () {
-        let mut a = IBLT::new(1000, 3);
+        let mut a = IBLT::new(1000, 3, 0, 0);
 
         let mut inserted = HashSet::new();
         let mut removed = HashSet::new();
@@ -246,30 +259,30 @@ mod test {
         assert!(deleted.is_empty());
     }
 
-
-
     #[test]
-    pub fn test_missing () {
-        let mut a = IBLT::new(1000, 3);
-        let mut b = IBLT::new(1000, 3);
+    pub fn test_substract() {
+        let mut a = IBLT::new(1000, 3, 0, 0);
 
+        let mut a_inserted = HashSet::new();
         for i in 0..20 {
+            a_inserted.insert([i; ID_LEN]);
             a.insert(&[i; ID_LEN]);
-            if i < 15 {
-                b.insert(&[i; ID_LEN])
-            }
         }
 
-        for m in  b.missing(&mut a.into_iter(true)).unwrap() {
-            b.insert(&m.unwrap()[..]);
-        }
+        let mut b = IBLT::new(1000, 3, 0, 0);
 
-        assert_eq!(b.iter(true).count(), 20)
+        let mut b_inserted = HashSet::new();
+        for i in 15..30 {
+            b_inserted.insert([i; ID_LEN]);
+            b.insert(&[i; ID_LEN]);
+        }
+        let c = a.substract(b);
+        assert_eq!(c.into_iter(true).map(|r| r.unwrap()).count(), 15);
     }
 
     #[test]
     pub fn test_overload() {
-        let mut a = IBLT::new(10, 5);
+        let mut a = IBLT::new(10, 5, 0, 0);
         for i in 0..20 {
             a.insert(&[i; ID_LEN]);
         }
