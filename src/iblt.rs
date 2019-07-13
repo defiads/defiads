@@ -94,6 +94,10 @@ impl IBLT {
         Ok(copy.into_iter(false))
     }
 
+    pub fn is_overloaded (&self) -> bool {
+        self.iter(true).any(|e| e.is_err())
+    }
+
     fn fast_reduce (n: u64, r: usize) -> usize {
         ((n as u128 * r as u128) >> 64) as usize
     }
@@ -263,4 +267,12 @@ mod test {
         assert_eq!(b.iter(true).count(), 20)
     }
 
+    #[test]
+    pub fn test_overload() {
+        let mut a = IBLT::new(10, 5);
+        for i in 0..20 {
+            a.insert(&[i; ID_LEN]);
+        }
+        assert!(a.is_overloaded());
+    }
 }
