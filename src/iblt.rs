@@ -277,7 +277,8 @@ mod test {
             b.insert(&[i; ID_LEN]);
         }
         let c = a.substract(b);
-        assert_eq!(c.into_iter(true).map(|r| r.unwrap()).count(), 15);
+        assert_eq!(c.iter(true).map(|r| r.unwrap()).count(), 15);
+        assert_eq!(c.into_iter(false).map(|r| r.unwrap()).count(), 10);
     }
 
     #[test]
