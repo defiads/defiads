@@ -102,10 +102,6 @@ impl IBLT {
         IBLT{buckets, k0: self.k0, k1: self.k1, k: self.k}
     }
 
-    pub fn is_overloaded (&self) -> bool {
-        self.iter(true).any(|e| e.is_err())
-    }
-
     fn fast_reduce (n: u64, r: usize) -> usize {
         ((n as u128 * r as u128) >> 64) as usize
     }
@@ -287,6 +283,6 @@ mod test {
         for i in 0..20 {
             a.insert(&[i; ID_LEN]);
         }
-        assert!(a.is_overloaded());
+        assert!(a.into_iter(true).any(|r|  r.is_err()));
     }
 }
