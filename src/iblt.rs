@@ -3,6 +3,8 @@
 
 use std::collections::vec_deque::VecDeque;
 use std::io::Write;
+use std::error::Error;
+use std::fmt;
 
 use bitcoin_hashes::siphash24;
 use rand::{RngCore, thread_rng};
@@ -84,14 +86,31 @@ impl IBLT {
     }
 
     /// return an itartor of ids missing in this one but is itarable from the other IBLT
-    pub fn missing (&mut self, other: &mut IBLTIterator) -> IBLTIterator {
+    pub fn missing (&mut self, other: &mut IBLTIterator) -> Result<IBLTIterator, IBLTError> {
         let mut copy = self.clone();
         for id in other {
-            copy.delete(&id[..]);
+            copy.delete(&id?[..]);
         }
-        copy.into_iter(false)
+        Ok(copy.into_iter(false))
     }
 
+}
+
+#[derive(Debug)]
+pub enum IBLTError {
+    IncompleteIteration
+}
+
+impl Error for IBLTError {
+    fn description(&self) -> &str {
+        "Incomplete IBLT iteration"
+    }
+}
+
+impl fmt::Display for IBLTError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{}", self.description())
+    }
 }
 
 pub struct IBLTIterator {
@@ -105,7 +124,8 @@ impl IBLTIterator {
         let one = if added { 1 } else { -1 };
         let mut queue = VecDeque::new();
         for (i, bucket) in iblt.buckets.iter().enumerate() {
-            if bucket.counter == one {
+            if bucket.counter.abs() == 1 &&
+                bucket.keyhash == IBLT::hash(iblt.k1, iblt.k0, &bucket.keysum[..]) {
                 queue.push_back(i);
             }
         }
@@ -114,13 +134,15 @@ impl IBLTIterator {
 }
 
 impl Iterator for IBLTIterator {
-    type Item = [u8; ID_LEN];
+    type Item = Result<[u8; ID_LEN], IBLTError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(i) = self.queue.pop_front() {
-            if self.iblt.buckets[i].counter == self.one {
-                let id = self.iblt.buckets[i].keysum.clone();
-                let found = IBLT::hash(self.iblt.k1, self.iblt.k0, &id[..]) == self.iblt.buckets[i].keyhash;
+            let c = self.iblt.buckets[i].counter;
+            if c.abs() == 1 {
+                let id = self.iblt.buckets[i].keysum;
+                let keyhash = IBLT::hash(self.iblt.k1, self.iblt.k0, &id[..]);
+                let found = c == self.one && keyhash == self.iblt.buckets[i].keyhash;
                 let mut hash = self.iblt.k0;
                 for _ in 0..self.iblt.k {
                     hash = IBLT::hash(hash, self.iblt.k1, &id[..]);
@@ -129,12 +151,21 @@ impl Iterator for IBLTIterator {
                     for i in 0..id.len () {
                         bucket.keysum[i] ^= id[i];
                     }
-                    bucket.counter -= 1;
-                    bucket.keyhash ^= IBLT::hash(self.iblt.k1, self.iblt.k0, &id[..]);
+                    bucket.counter -= c;
+                    bucket.keyhash ^= keyhash;
+                    if bucket.counter.abs() == 1 &&
+                        IBLT::hash(self.iblt.k1, self.iblt.k0, &bucket.keysum[..]) == bucket.keyhash {
+                        self.queue.push_back(n);
+                    }
                 }
                 if found {
-                    return Some(id);
+                    return Some(Ok(id));
                 }
+            }
+        }
+        for bucket in &self.iblt.buckets {
+            if bucket.counter != 0  {
+                return Some(Err(IBLTError::IncompleteIteration));
             }
         }
         None
@@ -151,7 +182,7 @@ mod test {
         let mut a = IBLT::new(10, 3);
 
         a.insert(&[1; ID_LEN]);
-        assert_eq!(a.iter(true).next().unwrap(), [1; ID_LEN]);
+        assert_eq!(a.iter(true).next().unwrap().unwrap(), [1; ID_LEN]);
     }
 
     #[test]
@@ -174,8 +205,7 @@ mod test {
         }
 
         for id in a.iter(true) {
-            println!("{:?}", id);
-            assert! (set.remove(&id));
+            assert! (set.remove(&id.unwrap()));
         }
         assert!(set.is_empty());
     }
@@ -198,13 +228,13 @@ mod test {
         let mut remained = inserted.difference(&removed).collect::<HashSet<_>>();
 
         for id in a.iter(true) {
-            assert! (remained.remove(&id));
+            assert! (remained.remove(&id.unwrap()));
         }
         assert!(remained.is_empty());
 
         let mut deleted = removed.difference(&inserted).collect::<HashSet<_>>();
         for id in a.iter(false) {
-            assert! (deleted.remove(&id));
+            assert! (deleted.remove(&id.unwrap()));
         }
         assert!(deleted.is_empty());
     }
@@ -223,8 +253,8 @@ mod test {
             }
         }
 
-        for m in  b.missing(&mut a.into_iter(true)) {
-            b.insert(&m[..]);
+        for m in  b.missing(&mut a.into_iter(true)).unwrap() {
+            b.insert(&m.unwrap()[..]);
         }
 
         assert_eq!(b.iter(true).count(), 20)
