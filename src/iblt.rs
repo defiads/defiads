@@ -74,13 +74,13 @@ impl IBLT {
     }
 
     /// iterate over ids. This preserves the IBLT as it makes a copy internally
-    pub fn iter(&self, added: bool) -> IBLTIterator {
-        IBLTIterator::new(self.clone(), added)
+    pub fn iter(&self) -> IBLTIterator {
+        IBLTIterator::new(self.clone())
     }
 
     /// iterare over ids. This destroys the IBLT
-    pub fn into_iter (self, added: bool) -> IBLTIterator {
-        IBLTIterator::new(self, added)
+    pub fn into_iter (self) -> IBLTIterator {
+        IBLTIterator::new(self)
     }
 
     /// substract an other IBLT from this and return the result
@@ -124,16 +124,20 @@ impl fmt::Display for IBLTError {
     }
 }
 
+#[derive(Eq, PartialEq, Debug)]
+pub enum IBLTEntry {
+    Inserted([u8; ID_LEN]),
+    Removed([u8; ID_LEN])
+}
+
 pub struct IBLTIterator {
     iblt: IBLT,
     queue: VecDeque<usize>,
-    one: i32,
     incomplete: bool
 }
 
 impl IBLTIterator {
-    pub fn new (iblt: IBLT, added: bool) -> IBLTIterator {
-        let one = if added { 1 } else { -1 };
+    pub fn new (iblt: IBLT) -> IBLTIterator {
         let mut queue = VecDeque::new();
         for (i, bucket) in iblt.buckets.iter().enumerate() {
             if bucket.counter.abs() == 1 &&
@@ -141,12 +145,12 @@ impl IBLTIterator {
                 queue.push_back(i);
             }
         }
-        IBLTIterator{iblt, queue, one, incomplete: false}
+        IBLTIterator{iblt, queue, incomplete: false}
     }
 }
 
 impl Iterator for IBLTIterator {
-    type Item = Result<[u8; ID_LEN], IBLTError>;
+    type Item = Result<IBLTEntry, IBLTError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.incomplete {
@@ -157,7 +161,7 @@ impl Iterator for IBLTIterator {
             if c.abs() == 1 {
                 let id = self.iblt.buckets[i].keysum;
                 let keyhash = IBLT::hash(self.iblt.k1, self.iblt.k0, &id[..]);
-                let found = c == self.one && keyhash == self.iblt.buckets[i].keyhash;
+                let found = c.abs() == 1 && keyhash == self.iblt.buckets[i].keyhash;
                 let mut hash = self.iblt.k0;
                 for _ in 0..self.iblt.k {
                     hash = IBLT::hash(hash, self.iblt.k1, &id[..]);
@@ -174,7 +178,12 @@ impl Iterator for IBLTIterator {
                     }
                 }
                 if found {
-                    return Some(Ok(id));
+                    if c == 1 {
+                        return Some(Ok(IBLTEntry::Inserted(id)));
+                    }
+                    else {
+                        return Some(Ok(IBLTEntry::Removed(id)));
+                    }
                 }
             }
         }
@@ -198,7 +207,7 @@ mod test {
         let mut a = IBLT::new(10, 3, 0, 0);
 
         a.insert(&[1; ID_LEN]);
-        assert_eq!(a.iter(true).next().unwrap().unwrap(), [1; ID_LEN]);
+        assert_eq!(a.iter().next().unwrap().unwrap(), IBLTEntry::Inserted([1; ID_LEN]));
     }
 
     #[test]
@@ -207,7 +216,7 @@ mod test {
 
         a.insert(&[1; ID_LEN]);
         a.delete(&[1; ID_LEN]);
-        assert!(a.iter(true).next().is_none());
+        assert!(a.iter().next().is_none());
     }
 
     #[test]
@@ -220,8 +229,10 @@ mod test {
             a.insert(&[i; ID_LEN]);
         }
 
-        for id in a.iter(true) {
-            assert! (set.remove(&id.unwrap()));
+        for id in a.iter().map(|e| e.unwrap()) {
+            if let IBLTEntry::Inserted(id) = id {
+                assert!(set.remove(&id));
+            }
         }
         assert!(set.is_empty());
     }
@@ -243,14 +254,18 @@ mod test {
 
         let mut remained = inserted.difference(&removed).collect::<HashSet<_>>();
 
-        for id in a.iter(true) {
-            assert! (remained.remove(&id.unwrap()));
+        for id in a.iter() {
+            if let IBLTEntry::Inserted(id) = id.unwrap() {
+                assert!(remained.remove(&id));
+            }
         }
         assert!(remained.is_empty());
 
         let mut deleted = removed.difference(&inserted).collect::<HashSet<_>>();
-        for id in a.iter(false) {
-            assert! (deleted.remove(&id.unwrap()));
+        for id in a.iter() {
+            if let IBLTEntry::Removed(id) = id.unwrap() {
+                assert!(deleted.remove(&id));
+            }
         }
         assert!(deleted.is_empty());
     }
@@ -273,8 +288,8 @@ mod test {
             b.insert(&[i; ID_LEN]);
         }
         let c = a.substract(b);
-        assert_eq!(c.iter(true).map(|r| r.unwrap()).count(), 15);
-        assert_eq!(c.into_iter(false).map(|r| r.unwrap()).count(), 10);
+        assert_eq!(c.iter().filter(|r| if let Ok(IBLTEntry::Inserted(_)) = r { true } else {false} ).count(), 15);
+        assert_eq!(c.into_iter().filter(|r| if let Ok(IBLTEntry::Removed(_)) = r { true } else {false} ).count(), 10);
     }
 
     #[test]
@@ -283,6 +298,6 @@ mod test {
         for i in 0..20 {
             a.insert(&[i; ID_LEN]);
         }
-        assert!(a.into_iter(true).any(|r|  r.is_err()));
+        assert!(a.into_iter().any(|r|  r.is_err()));
     }
 }
