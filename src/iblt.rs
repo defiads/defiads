@@ -135,6 +135,14 @@ pub fn min_sketch(k:usize, k0: u64, k1: u64, ids: &mut Iterator<Item=[u8; ID_LEN
     min_hashes
 }
 
+/// estimate difference size from two known sketches and sizes
+pub fn estimate_diff_size(k:usize, sa: &Vec<u16>, al: usize, sb: &Vec<u16>, bl: usize) -> usize {
+    assert!(sa.len() == sb.len());
+    let r = sa.iter().zip(sb.iter()).filter(|(a, b)| *a == *b).count() as f32 / k as f32;
+    ((1.0-r)/(1.0+r)*(al + bl) as f32) as usize
+}
+
+
 
 #[derive(Debug)]
 pub enum IBLTError {
