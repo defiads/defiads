@@ -8,6 +8,7 @@ use std::fmt;
 
 use bitcoin_hashes::siphash24;
 use byteorder::{WriteBytesExt, BigEndian};
+use std::cmp::min;
 
 const ID_LEN:usize = 32;
 
@@ -33,8 +34,9 @@ impl IBLT {
         IBLT{buckets: vec![Bucket::default();m], k0, k1, k}
     }
 
-    fn hash (k0: u64, k1: u64, id: &[u8]) -> u64 {
-        let mut engine = siphash24::HashEngine::with_keys(k0, k1);
+    fn hash (n: u8, k0: u64, k1: u64, id: &[u8]) -> u64 {
+        // TODO: find a better tweak to get nth hash function
+        let mut engine = siphash24::HashEngine::with_keys(k0 + n as u64, k1);
         engine.write_all(id).unwrap();
         siphash24::Hash::from_engine_to_u64(engine)
     }
@@ -42,10 +44,10 @@ impl IBLT {
     /// insert an id
     pub fn insert (&mut self, id: &[u8]) {
         assert_eq!(id.len(), ID_LEN);
-        let keyhash = Self::hash(self.k1, self.k0, id);
+        let keyhash = Self::hash(0, self.k0, self.k1, id);
         let mut hash = self.k0;
-        for _ in 0..self.k {
-            hash = Self::hash(hash, self.k1, id);
+        for i in 0..self.k {
+            hash = Self::hash(i+1, self.k0, self.k1, id);
             let n = IBLT::fast_reduce(hash, self.buckets.len());
             let ref mut bucket = self.buckets[n];
             for i in 0..id.len () {
@@ -59,10 +61,10 @@ impl IBLT {
     /// delete an id
     pub fn delete (&mut self, id: &[u8]) {
         assert_eq!(id.len(), ID_LEN);
-        let keyhash = Self::hash(self.k1, self.k0, id);
+        let keyhash = Self::hash(0, self.k0, self.k1, id);
         let mut hash = self.k0;
-        for _ in 0..self.k {
-            hash = Self::hash(hash, self.k1, id);
+        for i in 0..self.k {
+            hash = Self::hash(i+1, self.k0, self.k1, id);
             let n = IBLT::fast_reduce(hash, self.buckets.len());
             let ref mut bucket = self.buckets[n];
             for i in 0..id.len () {
@@ -107,6 +109,21 @@ impl IBLT {
     }
 }
 
+/// compute a min sketch of k size
+pub fn min_sketch(k:usize, k0: u64, k1: u64, ids: &mut Iterator<Item=[u8; ID_LEN]>) -> Vec<u64> {
+    let mut min_hashes = vec![0xffffffffffffffff; k];
+    for id in ids {
+        for i in 0..k {
+            let mut engine = siphash24::HashEngine::with_keys(k0 + i as u64 , k1);
+            engine.write_all(&id).unwrap();
+            let hash = siphash24::Hash::from_engine_to_u64(engine);
+            min_hashes[k] = min(hash, min_hashes[k]);
+        }
+    }
+    min_hashes
+}
+
+
 #[derive(Debug)]
 pub enum IBLTError {
     IncompleteIteration
@@ -141,7 +158,7 @@ impl IBLTIterator {
         let mut queue = VecDeque::new();
         for (i, bucket) in iblt.buckets.iter().enumerate() {
             if bucket.counter.abs() == 1 &&
-                bucket.keyhash == IBLT::hash(iblt.k1, iblt.k0, &bucket.keysum[..]) {
+                bucket.keyhash == IBLT::hash(0,iblt.k0, iblt.k1, &bucket.keysum[..]) {
                 queue.push_back(i);
             }
         }
@@ -160,11 +177,11 @@ impl Iterator for IBLTIterator {
             let c = self.iblt.buckets[i].counter;
             if c.abs() == 1 {
                 let id = self.iblt.buckets[i].keysum;
-                let keyhash = IBLT::hash(self.iblt.k1, self.iblt.k0, &id[..]);
+                let keyhash = IBLT::hash(0, self.iblt.k0, self.iblt.k1, &id[..]);
                 let found = c.abs() == 1 && keyhash == self.iblt.buckets[i].keyhash;
                 let mut hash = self.iblt.k0;
-                for _ in 0..self.iblt.k {
-                    hash = IBLT::hash(hash, self.iblt.k1, &id[..]);
+                for i in 0..self.iblt.k {
+                    hash = IBLT::hash(i+1, self.iblt.k0, self.iblt.k1, &id[..]);
                     let n = IBLT::fast_reduce(hash, self.iblt.buckets.len());
                     let ref mut bucket = self.iblt.buckets[n];
                     for i in 0..id.len () {
@@ -173,7 +190,7 @@ impl Iterator for IBLTIterator {
                     bucket.counter -= c;
                     bucket.keyhash ^= keyhash;
                     if bucket.counter.abs() == 1 &&
-                        IBLT::hash(self.iblt.k1, self.iblt.k0, &bucket.keysum[..]) == bucket.keyhash {
+                        IBLT::hash(0, self.iblt.k0, self.iblt.k1, &bucket.keysum[..]) == bucket.keyhash {
                         self.queue.push_back(n);
                     }
                 }
