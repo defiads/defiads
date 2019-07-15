@@ -1,7 +1,10 @@
-//! Iterable Bloom Lookup Table
+//! Invertible Bloom Lookup Table
 //! see: https://dash.harvard.edu/bitstream/handle/1/14398536/GENTILI-SENIORTHESIS-2015.pdf
 
-use std::collections::vec_deque::VecDeque;
+use std::collections::{
+    hash_set::HashSet,
+    vec_deque::VecDeque
+};
 use std::io::Write;
 use std::error::Error;
 use std::fmt;
@@ -11,6 +14,23 @@ use byteorder::{WriteBytesExt, BigEndian,ByteOrder};
 use std::cmp::min;
 
 const ID_LEN:usize = 32;
+
+type ID = [u8; ID_LEN];
+
+pub trait IDSet {
+    fn insert (&mut self, id: ID) -> bool;
+    fn remove(&mut self, id: &ID) -> bool;
+}
+
+impl IDSet for HashSet<ID> {
+    fn insert(&mut self, id: [u8; 32]) -> bool {
+        self.insert(id)
+    }
+
+    fn remove(&mut self, id: &[u8; 32]) -> bool {
+        self.remove(id)
+    }
+}
 
 #[derive(Clone)]
 pub struct IBLT {
@@ -23,14 +43,14 @@ pub struct IBLT {
 
 #[derive(Default,Clone)]
 struct Bucket {
-    keysum: [u8; ID_LEN],
+    keysum: ID,
     keyhash: u64,
     counter: i32
 }
 
 impl IBLT {
 
-    pub fn generate_ksequence(k: usize, mut k0: u64, mut k1: u64) -> Vec<(u64, u64)> {
+    fn generate_ksequence(k: usize, mut k0: u64, mut k1: u64) -> Vec<(u64, u64)> {
         let mut ksequence = Vec::new();
         let mut buf = [0u8;8];
         for _ in 0..k {
@@ -58,9 +78,8 @@ impl IBLT {
     pub fn insert (&mut self, id: &[u8]) {
         assert_eq!(id.len(), ID_LEN);
         let keyhash = self.hash(0, id);
-        let mut hash = self.k0;
         for i in 0..self.k {
-            hash = self.hash(i+1, id);
+            let hash = self.hash(i+1, id);
             let n = IBLT::fast_reduce(hash, self.buckets.len());
             let ref mut bucket = self.buckets[n];
             for i in 0..id.len () {
@@ -75,9 +94,8 @@ impl IBLT {
     pub fn delete (&mut self, id: &[u8]) {
         assert_eq!(id.len(), ID_LEN);
         let keyhash = self.hash(0, id);
-        let mut hash = self.k0;
         for i in 0..self.k {
-            hash = self.hash(i+1, id);
+            let hash = self.hash(i+1, id);
             let n = IBLT::fast_reduce(hash, self.buckets.len());
             let ref mut bucket = self.buckets[n];
             for i in 0..id.len () {
@@ -120,24 +138,36 @@ impl IBLT {
     fn fast_reduce (n: u64, r: usize) -> usize {
         ((n as u128 * r as u128) >> 64) as usize
     }
+
+    pub fn sync(self, other: IBLT, set: &mut impl IDSet) -> Result<(), Box<Error>> {
+        let diff = self.substract(other);
+        for e in diff.iter() {
+            match e? {
+                IBLTEntry::Inserted(ref id) => set.remove(id),
+                IBLTEntry::Deleted(id) => set.insert(id)
+            };
+        }
+        Ok(())
+    }
 }
 
-/// compute a min sketch of k size
-pub fn min_sketch(k:usize, k0: u64, k1: u64, ids: &mut Iterator<Item=[u8; ID_LEN]>) -> Vec<u16> {
-    let ksequence = IBLT::generate_ksequence(k, k0, k1);
-    let mut min_hashes = vec![0xffff; k];
+pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut Iterator<Item=&ID>) -> Vec<u16> {
+    let ksequence = IBLT::generate_ksequence(n, k0, k1);
+    let mut min_hashes = vec![0xffff; n];
     for id in ids {
-        for i in 0..k {
-            min_hashes[k] = min(min_hashes[k],
-                                siphash24::Hash::hash_to_u64_with_keys(k0, k1, &id) as u16);
+        for i in 0..n {
+            let (k0, k1) = ksequence[i];
+            min_hashes[i] = min(min_hashes[i],
+                siphash24::Hash::hash_to_u64_with_keys(k0, k1, id) as u16);
         }
     }
     min_hashes
 }
 
 /// estimate difference size from two known sketches and sizes
-pub fn estimate_diff_size(k:usize, sa: &Vec<u16>, al: usize, sb: &Vec<u16>, bl: usize) -> usize {
+pub fn estimate_diff_size(sa: Vec<u16>, al: usize, sb: Vec<u16>, bl: usize) -> usize {
     assert!(sa.len() == sb.len());
+    let k = sa.len();
     let r = sa.iter().zip(sb.iter()).filter(|(a, b)| *a == *b).count() as f32 / k as f32;
     ((1.0-r)/(1.0+r)*(al + bl) as f32) as usize
 }
@@ -163,8 +193,8 @@ impl fmt::Display for IBLTError {
 
 #[derive(Eq, PartialEq, Debug)]
 pub enum IBLTEntry {
-    Inserted([u8; ID_LEN]),
-    Deleted([u8; ID_LEN])
+    Inserted(ID),
+    Deleted(ID)
 }
 
 pub struct IBLTIterator {
@@ -199,9 +229,8 @@ impl Iterator for IBLTIterator {
                 let id = self.iblt.buckets[i].keysum;
                 let keyhash = self.iblt.hash(0, &id[..]);
                 let found = c.abs() == 1 && keyhash == self.iblt.buckets[i].keyhash;
-                let mut hash = self.iblt.k0;
                 for i in 0..self.iblt.k {
-                    hash = self.iblt.hash(i+1, &id[..]);
+                    let hash = self.iblt.hash(i+1, &id[..]);
                     let n = IBLT::fast_reduce(hash, self.iblt.buckets.len());
                     {
                         let ref mut bucket = self.iblt.buckets[n];
@@ -312,7 +341,7 @@ mod test {
 
     #[test]
     pub fn test_substract() {
-        let mut a = IBLT::new(1000, 3, 0, 0);
+        let mut a = IBLT::new(70, 3, 0, 0);
 
         let mut a_inserted = HashSet::new();
         for i in 0..20 {
@@ -320,7 +349,7 @@ mod test {
             a.insert(&[i; ID_LEN]);
         }
 
-        let mut b = IBLT::new(1000, 3, 0, 0);
+        let mut b = IBLT::new(70, 3, 0, 0);
 
         let mut b_inserted = HashSet::new();
         for i in 15..30 {
@@ -339,5 +368,60 @@ mod test {
             a.insert(&[i; ID_LEN]);
         }
         assert!(a.into_iter().any(|r|  r.is_err()));
+    }
+
+    #[test]
+    pub fn test_sync () {
+        use bitcoin_hashes::sha256;
+        use bitcoin_hashes::Hash;
+
+        let mut a = HashSet::new();
+        let mut b = HashSet::new();
+
+        let mut id = sha256::Hash::default();
+        for i in 0..1000 {
+            let mut t = [0u8; 32];
+            t.copy_from_slice(&id[..]);
+            if i >= 100 {
+                a.insert(t.clone());
+            }
+            if i < 900 {
+                b.insert(t.clone());
+            }
+            id = sha256::Hash::hash(&t);
+        }
+
+        let k0 = 0;
+        let k1 = 0;
+
+        let a_sketch = min_sketch(100, k0, k1, &mut a.iter());
+        let al = a.len();
+
+        let b_sketch = min_sketch(100, k0, k1, &mut b.iter());
+        let bl = b.len();
+
+        let diffsize = estimate_diff_size(a_sketch, al, b_sketch, bl);
+
+        let mut a_iblt = IBLT::new(diffsize * 3, 3, k0, k1);
+        for id in a.iter() {
+            a_iblt.insert(id);
+        }
+
+        let mut b_iblt = IBLT::new(diffsize * 3, 3, k0, k1);
+        for id in b.iter() {
+            b_iblt.insert(id);
+        }
+
+        let mut b_to_a = IBLT::new(diffsize, 3, k0, k1);
+        for id in a.iter() {
+            b_to_a.insert(id);
+        }
+
+        let mut a_copy = a.clone();
+        a_iblt.clone().sync(b_iblt.clone(), &mut a_copy).unwrap();
+        assert_eq!(a_copy, b);
+
+        b_iblt.clone().sync(a_iblt.clone(), &mut b).unwrap();
+        assert_eq!(a, b);
     }
 }
