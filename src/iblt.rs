@@ -127,7 +127,7 @@ impl fmt::Display for IBLTError {
 #[derive(Eq, PartialEq, Debug)]
 pub enum IBLTEntry {
     Inserted([u8; ID_LEN]),
-    Removed([u8; ID_LEN])
+    Deleted([u8; ID_LEN])
 }
 
 pub struct IBLTIterator {
@@ -182,7 +182,7 @@ impl Iterator for IBLTIterator {
                         return Some(Ok(IBLTEntry::Inserted(id)));
                     }
                     else {
-                        return Some(Ok(IBLTEntry::Removed(id)));
+                        return Some(Ok(IBLTEntry::Deleted(id)));
                     }
                 }
             }
@@ -263,7 +263,7 @@ mod test {
 
         let mut deleted = removed.difference(&inserted).collect::<HashSet<_>>();
         for id in a.iter() {
-            if let IBLTEntry::Removed(id) = id.unwrap() {
+            if let IBLTEntry::Deleted(id) = id.unwrap() {
                 assert!(deleted.remove(&id));
             }
         }
@@ -289,7 +289,7 @@ mod test {
         }
         let c = a.substract(b);
         assert_eq!(c.iter().filter(|r| if let Ok(IBLTEntry::Inserted(_)) = r { true } else {false} ).count(), 15);
-        assert_eq!(c.into_iter().filter(|r| if let Ok(IBLTEntry::Removed(_)) = r { true } else {false} ).count(), 10);
+        assert_eq!(c.into_iter().filter(|r| if let Ok(IBLTEntry::Deleted(_)) = r { true } else {false} ).count(), 10);
     }
 
     #[test]
