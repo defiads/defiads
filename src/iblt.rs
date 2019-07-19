@@ -14,6 +14,7 @@ use byteorder::{WriteBytesExt, BigEndian,ByteOrder};
 use std::cmp::min;
 use std::ops::BitXorAssign;
 use std::ops::BitXor;
+use std::sync::Arc;
 
 const ID_LEN:usize = 32;
 
@@ -63,7 +64,7 @@ pub struct IBLT {
     k0: u64,
     k1: u64,
     k: usize,
-    ksequence: Vec<(u64, u64)>
+    ksequence: Arc<Vec<(u64, u64)>>
 }
 
 #[derive(Default,Clone)]
@@ -78,12 +79,13 @@ impl IBLT {
     fn generate_ksequence(k: usize, mut k0: u64, mut k1: u64) -> Vec<(u64, u64)> {
         let mut ksequence = Vec::new();
         let mut buf = [0u8;8];
-        for _ in 0..k {
-            ksequence.push((k0, k1));
+        ksequence.push((k0, k1));
+        for _ in 1..k {
             BigEndian::write_u64(&mut buf, k0);
             k0 = hash_slice_to_u64_with_keys(k0, k1, &buf);
             BigEndian::write_u64(&mut buf, k1);
             k1 = hash_slice_to_u64_with_keys(k0, k1, &buf);
+            ksequence.push((k0, k1));
         }
         ksequence
     }
@@ -91,33 +93,35 @@ impl IBLT {
     /// Create a new IBLT with m buckets and k hash functions
     pub fn new (m: usize, k: usize, k0: u64, k1: u64) -> IBLT {
         IBLT{buckets: vec![Bucket::default();m], k0, k1, k,
-            ksequence: Self::generate_ksequence(k+1, k0, k1)}
+            ksequence: Arc::new(Self::generate_ksequence(k+1, k0, k1))}
     }
 
-    fn hash (&self, n: usize, id: &IBLTKey) -> u64 {
+    fn hash (&self, n: usize, key: &IBLTKey) -> u64 {
         let (k0, k1) = self.ksequence[n];
-        hash_to_u64_with_keys(k0, k1, id)
+        hash_to_u64_with_keys(k0, k1, key)
+    }
+
+    fn buckets(&self, key: &IBLTKey) -> BucketIterator {
+        BucketIterator::new(self, key)
     }
 
     /// insert an id
-    pub fn insert (&mut self, id: &IBLTKey) {
-        let keyhash = self.hash(0, id);
-        for i in 0..self.k {
-            let n = self.hash(i+1, id) as usize % self.buckets.len();
+    pub fn insert (&mut self, key: &IBLTKey) {
+        let keyhash = self.hash(0, key);
+        for n in self.buckets(key) {
             let ref mut bucket = self.buckets[n];
-            bucket.keysum ^= *id;
+            bucket.keysum ^= *key;
             bucket.count += 1;
             bucket.hashsum ^= keyhash;
         }
     }
 
     /// delete an id
-    pub fn delete (&mut self, id: &IBLTKey) {
-        let keyhash = self.hash(0, id);
-        for i in 0..self.k {
-            let n = self.hash(i+1, id) as usize % self.buckets.len();
+    pub fn delete (&mut self, key: &IBLTKey) {
+        let keyhash = self.hash(0, key);
+        for n in self.buckets(key) {
             let ref mut bucket = self.buckets[n];
-            bucket.keysum ^= *id;
+            bucket.keysum ^= *key;
             bucket.count -= 1;
             bucket.hashsum ^= keyhash;
         }
@@ -164,9 +168,8 @@ pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut Iterator<Item=&IBLTKey>) 
     let ksequence = IBLT::generate_ksequence(n, k0, k1);
     let mut min_hashes = vec![0xffff; n];
     for id in ids {
-        for i in 0..n {
-            let (k0, k1) = ksequence[i];
-            min_hashes[i] = min(min_hashes[i], hash_to_u64_with_keys(k0, k1, id) as u16);
+        for (i, (k0, k1)) in ksequence.iter().enumerate() {
+            min_hashes[i] = min(min_hashes[i], hash_to_u64_with_keys(*k0, *k1, id) as u16);
         }
     }
     min_hashes
@@ -193,6 +196,37 @@ fn hash_slice_to_u64_with_keys (k0: u64, k1: u64, s: &[u8]) -> u64 {
     let mut hasher = siphasher::sip::SipHasher::new_with_keys(k0, k1);
     hasher.write(s);
     hasher.finish()
+}
+
+struct BucketIterator {
+    buckets: Vec<usize>,
+    pos: usize
+}
+
+impl BucketIterator {
+    fn new (iblt: &IBLT, key: &IBLTKey) -> BucketIterator {
+        let mut buckets= Vec::new();
+        let len = iblt.buckets.len();
+        for (k0, k1) in iblt.ksequence.iter() {
+            buckets.push(hash_to_u64_with_keys(*k0, *k1, key) as usize % len);
+        }
+        buckets.sort();
+        buckets.dedup();
+        BucketIterator{buckets, pos: 0}
+    }
+}
+
+impl Iterator for BucketIterator {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos == self.buckets.len() {
+            return None;
+        }
+        let b = self.buckets[self.pos];
+        self.pos += 1;
+        Some(b)
+    }
 }
 
 
@@ -250,8 +284,7 @@ impl Iterator for IBLTIterator {
             if c.abs() == 1 {
                 let key = self.iblt.buckets[i].keysum;
                 let keyhash = self.iblt.hash(0, &key);
-                for k in 0..self.iblt.k {
-                    let n = self.iblt.hash(k+1, &key) as usize % self.iblt.buckets.len();
+                for n in self.iblt.buckets(&key) {
                     {
                         let ref mut bucket = self.iblt.buckets[n];
                         bucket.keysum ^= key;
@@ -395,13 +428,13 @@ mod test {
         let mut b = HashSet::new();
 
         let mut id = sha256::Hash::default();
-        for i in 0..10000 {
+        for i in 0..1000 {
             let mut t = [0u8; 32];
             t.copy_from_slice(&id[..]);
             if i >= 100 {
                 a.insert(IBLTKey::new(&t, 0));
             }
-            if i < 9900 {
+            if i < 900 {
                 b.insert(IBLTKey::new(&t, 0));
             }
             id = sha256::Hash::hash(&t);
@@ -410,13 +443,13 @@ mod test {
         let k0 = 0;
         let k1 = 0;
 
-        let a_sketch = min_sketch(100, k0, k1, &mut a.iter());
+        let a_sketch = min_sketch(10, k0, k1, &mut a.iter());
         let al = a.len();
 
-        let b_sketch = min_sketch(100, k0, k1, &mut b.iter());
+        let b_sketch = min_sketch(10, k0, k1, &mut b.iter());
         let bl = b.len();
 
-        let buckets = estimate_diff_size(a_sketch, al, b_sketch, bl) * 3;
+        let buckets = estimate_diff_size(a_sketch, al, b_sketch, bl)*3/2;
 
         let mut a_iblt = IBLT::new(buckets, 4, k0, k1);
         for id in a.iter() {
