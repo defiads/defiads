@@ -15,7 +15,10 @@ extern crate serde_derive;
 #[cfg(test)]
 extern crate hex;
 extern crate bitcoin_hashes;
+extern crate bitcoin;
+extern crate siphasher;
 
 mod text;
 mod ad;
 mod iblt;
+mod messages;

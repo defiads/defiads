@@ -10,7 +10,9 @@ byteorder = "1"
 serde = "1"
 serde_derive = "1"
 serde_cbor = "0.10"
-bitcoin_hashes="0.4"
+bitcoin_hashes={version="0.3", features=["serde"]}
+bitcoin={version="0.18", features=["serde"]}
+siphasher="0.3"
 
 [dev-dependencies]
 hex="0.3"

@@ -98,7 +98,7 @@ mod test {
                     }
                 ]};
 
-        println!("Ad {:?}\nhas commitment {}", ad, hex::encode(ad.commitment()));
+        println!("Ad {:?}\nhas commitment {}", ad, hex::encode(&ad.commitment()[..]));
         println!("Ad serialized to {}", hex::encode(ad.serialize()));
         assert_eq!(Ad::deserialize(ad.serialize().as_slice()).unwrap(), ad);
         println!("Deserealized to same content.")
