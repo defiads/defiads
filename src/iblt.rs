@@ -27,28 +27,26 @@ pub struct IBLTKey {
 
 impl BitXorAssign for IBLTKey {
     fn bitxor_assign(&mut self, rhs: IBLTKey) {
-        for (i, d) in self.digest.iter_mut().enumerate() {
-            *d ^= rhs.digest[i];
-        }
+        self.digest.iter_mut().zip(rhs.digest.iter()).for_each(|(a, b)| *a ^= b);
         self.weight ^= rhs.weight;
     }
 }
 
 impl IBLTKey {
     pub fn new (hash: &[u8], weight: u32) -> IBLTKey {
-        assert_eq!(hash.len(), 32);
-        let mut digest = [0u8; 32];
+        assert_eq!(hash.len(), ID_LEN);
+        let mut digest = [0u8; ID_LEN];
         digest.copy_from_slice(hash);
         IBLTKey{digest, weight}
     }
 }
 
-pub trait IDSet {
+pub trait IBLTKeySet {
     fn insert (&mut self, id: IBLTKey) -> bool;
     fn remove(&mut self, id: &IBLTKey) -> bool;
 }
 
-impl IDSet for HashSet<IBLTKey> {
+impl IBLTKeySet for HashSet<IBLTKey> {
     fn insert(&mut self, id: IBLTKey) -> bool {
         self.insert(id)
     }
@@ -151,7 +149,7 @@ impl IBLT {
         }
     }
 
-    pub fn sync(&self, other: &IBLT, set: &mut impl IDSet) -> Result<(), Box<Error>> {
+    pub fn sync(&self, other: &IBLT, set: &mut impl IBLTKeySet) -> Result<(), Box<Error>> {
         let mut copy = self.clone();
         copy.substract(other);
         for e in copy.iter() {
@@ -339,7 +337,7 @@ mod test {
 
     #[test]
     pub fn test_few_inserts () {
-        let mut a = IBLT::new(25, 3, 0, 0);
+        let mut a = IBLT::new(30, 3, 0, 0);
 
         let mut set = HashSet::new();
         for i in 0..20 {
@@ -357,7 +355,7 @@ mod test {
 
     #[test]
     pub fn test_few_inserts_deletes () {
-        let mut a = IBLT::new(60, 3, 0, 0);
+        let mut a = IBLT::new(30, 3, 0, 0);
 
         let mut inserted = HashSet::new();
         let mut removed = HashSet::new();
@@ -431,10 +429,10 @@ mod test {
         for i in 0..1000 {
             let mut t = [0u8; 32];
             t.copy_from_slice(&id[..]);
-            if i >= 100 {
+            if i >= 200 {
                 a.insert(IBLTKey::new(&t, 0));
             }
-            if i < 900 {
+            if i < 800 {
                 b.insert(IBLTKey::new(&t, 0));
             }
             id = sha256::Hash::hash(&t);

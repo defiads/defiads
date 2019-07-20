@@ -3,6 +3,7 @@
 use crate::iblt::IBLTKey;
 use crate::ad::Ad;
 use crate::bitcoin_hashes::sha256d;
+use crate::bitcoin_hashes::sha256;
 use crate::bitcoin::blockdata::transaction::Transaction;
 use crate::serde::{Serializer, Serialize, Deserialize, Deserializer};
 
@@ -11,7 +12,9 @@ use crate::serde::{Serializer, Serialize, Deserialize, Deserializer};
 pub enum Messages {
     Connect(ConnectMessage),
     Substantiate(Vec<IBLTKey>),
-    InsertedID(InsertedIDMessage)
+    InsertedID(InsertedIDMessage),
+    GetAds(GetAdsMessage),
+    Ad(Ad)
 }
 
 /// Connect message
@@ -20,7 +23,16 @@ pub struct ConnectMessage {
     /// known chain tip of Bitcoin
     tip: sha256d::Hash,
     /// min sketch of own id set
-    sketch: Vec<u16>
+    sketch: Vec<u16>,
+    /// own set size
+    size: usize
+}
+
+/// Message to ask for certain ads
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GetAdsMessage {
+    /// list of ads
+    ids: Vec<sha256::Hash>
 }
 
 /// Substantiation of an inserted ID
@@ -33,13 +45,10 @@ pub struct InsertedIDMessage {
 /// proof that a transaction was included into the Bitcoin block chain
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SPVProof {
-    pair: Vec<SPVNode>
+    header: sha256d::Hash,
+    transaction: Transaction,
+    leafs: Vec<sha256d::Hash>
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub enum SPVNode {
-    Hash(sha256d::Hash),
-    Transaction(Transaction)
-}
 
 
