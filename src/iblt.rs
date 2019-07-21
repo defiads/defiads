@@ -89,12 +89,11 @@ impl<K : IBLTKey> IBLT<K> {
     /// Create a new IBLT with m buckets and k hash functions
     pub fn new (m: usize, k: usize, k0: u64, k1: u64) -> IBLT<K> {
         IBLT{buckets: vec![Bucket::default();m], k0, k1, k,
-            ksequence: generate_ksequence(k+1, k0, k1)}
+            ksequence: generate_ksequence(k, k0, k1)}
     }
 
-    fn hash (&self, n: usize, key: &K) -> u64 {
-        let (k0, k1) = self.ksequence[n];
-        key.hash_to_u64_with_keys(k0, k1)
+    fn keyhash(&self, key: &K) -> u64 {
+        key.hash_to_u64_with_keys(self.k0, self.k1)
     }
 
     fn buckets(&self, key: &K) -> BucketIterator {
@@ -103,7 +102,7 @@ impl<K : IBLTKey> IBLT<K> {
 
     /// insert an id
     pub fn insert (&mut self, key: &K) {
-        let keyhash = self.hash(0, key);
+        let keyhash = self.keyhash(key);
         for n in self.buckets(key) {
             let ref mut bucket = self.buckets[n];
             bucket.keysum ^= *key;
@@ -114,7 +113,7 @@ impl<K : IBLTKey> IBLT<K> {
 
     /// delete an id
     pub fn delete (&mut self, key: &K) {
-        let keyhash = self.hash(0, key);
+        let keyhash = self.keyhash(key);
         for n in self.buckets(key) {
             let ref mut bucket = self.buckets[n];
             bucket.keysum ^= *key;
@@ -184,8 +183,7 @@ pub fn estimate_diff_size(sa: Vec<u16>, al: usize, sb: Vec<u16>, bl: usize) -> u
 fn generate_ksequence(k: usize, mut k0: u64, mut k1: u64) -> Vec<(u64, u64)> {
     let mut ksequence = Vec::new();
     let mut buf = [0u8;8];
-    ksequence.push((k0, k1));
-    for _ in 1..k {
+    for _ in 0..k {
         BigEndian::write_u64(&mut buf, k0);
         k0 = hash_slice_to_u64_with_keys(k0, k1, &buf);
         BigEndian::write_u64(&mut buf, k1);
@@ -267,7 +265,7 @@ impl<K: IBLTKey> IBLTIterator<K> {
         let mut queue = VecDeque::new();
         for (i, bucket) in iblt.buckets.iter().enumerate() {
             if bucket.count.abs() == 1 &&
-                bucket.hashsum == iblt.hash(0, &bucket.keysum) {
+                bucket.hashsum == iblt.keyhash(&bucket.keysum) {
                 queue.push_back(i);
             }
         }
@@ -286,7 +284,7 @@ impl<K: IBLTKey> Iterator for IBLTIterator<K> {
             let c = self.iblt.buckets[i].count;
             if c.abs() == 1 {
                 let key = self.iblt.buckets[i].keysum;
-                let keyhash = self.iblt.hash(0, &key);
+                let keyhash = self.iblt.keyhash(&key);
                 for n in self.iblt.buckets(&key) {
                     {
                         let ref mut bucket = self.iblt.buckets[n];
@@ -296,7 +294,7 @@ impl<K: IBLTKey> Iterator for IBLTIterator<K> {
                     }
                     let ref bucket = self.iblt.buckets[n];
                     if bucket.count.abs() == 1 &&
-                        self.iblt.hash(0, &bucket.keysum) == bucket.hashsum {
+                        self.iblt.keyhash(&bucket.keysum) == bucket.hashsum {
                         self.queue.push_back(n);
                     }
                 }
@@ -360,7 +358,7 @@ mod test {
 
     #[test]
     pub fn test_few_inserts_deletes () {
-        let mut a = IBLT::new(30, 3, 0, 0);
+        let mut a = IBLT::new(35, 3, 0, 0);
 
         let mut inserted = HashSet::new();
         let mut removed = HashSet::new();
