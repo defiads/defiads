@@ -42,12 +42,15 @@ const DIGEST_LEN: usize = secp256k1::constants::MESSAGE_SIZE;
 pub struct ContentKey {
     /// content digest
     pub digest: [u8; DIGEST_LEN],
-    /// content weight
+    /// content length
+    pub length: u32,
+    /// content weight (funding/length)
     pub weight: u32
 }
 
 impl BitXorAssign for ContentKey {
     fn bitxor_assign(&mut self, rhs: ContentKey) {
+        self.length ^= rhs.length;
         self.weight ^= rhs.weight;
         self.digest.iter_mut().zip(rhs.digest.iter()).for_each(|(a, b)| *a ^= b);
     }
@@ -57,6 +60,8 @@ impl IBLTKey for ContentKey {
     fn hash_to_u64_with_keys(&self, k0: u64, k1: u64) -> u64 {
         let mut hasher = siphasher::sip::SipHasher::new_with_keys(k0, k1);
         let mut buf = [0u8; 4];
+        BigEndian::write_u32(&mut buf, self.length);
+        hasher.write(&buf);
         BigEndian::write_u32(&mut buf, self.weight);
         hasher.write(&buf);
         hasher.write(&self.digest[..]);
@@ -71,11 +76,11 @@ impl fmt::Debug for ContentKey {
 }
 
 impl ContentKey {
-    pub fn new (hash: &[u8], weight: u32) -> ContentKey {
+    pub fn new (hash: &[u8], length: u32, weight: u32) -> ContentKey {
         assert_eq!(hash.len(), DIGEST_LEN);
         let mut digest = [0u8; DIGEST_LEN];
         digest.copy_from_slice(&hash[..]);
-        ContentKey{digest, weight}
+        ContentKey{digest, length, weight}
     }
 }
 
@@ -121,22 +126,16 @@ impl Content {
         }) == *merkle_root
     }
 
-    /// check if the funding transaction really funds this ad
-    pub fn is_valid_funding (&self, ctx: &Secp256k1<VerifyOnly>) -> bool {
-        let f_script = funding_script(&self.funder, &self.digest(), self.term, ctx);
-        self.funding.output.iter().any(|o| o.script_pubkey == f_script)
+    pub fn length(&self) -> u32 {
+        serde_cbor::to_vec(self).len() as u32
     }
 
-    pub fn is_valid (&self, merkle_root: &sha256d::Hash, ctx: &Secp256k1<VerifyOnly>) -> bool {
-        self.is_valid_funding(ctx) && self.is_valid_spv_proof(merkle_root)
-    }
-
+    /// return ratio of funding and size
     pub fn weight (&self, ctx: &Secp256k1<VerifyOnly>) -> u32 {
         let f_script = funding_script(&self.funder, &self.digest(), self.term, ctx);
 
         (self.funding.output.iter().filter_map(|o| if o.script_pubkey == f_script { Some(o.value)} else {None}).sum::<u64>()
-            /
-        (self.data.len() + consensus::serialize(&self.funding).len() + self.spv_proof.len() * 32usize) as u64) as u32
+            / self.length() as u64) as u32
     }
 }
 
