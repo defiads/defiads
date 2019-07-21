@@ -149,7 +149,7 @@ impl<K : IBLTKey> IBLT<K> {
         }
     }
 
-    pub fn sync(&self, other: &IBLT<K>, set: &mut impl IBLTKeySet<K>) -> Result<(), Box<Error>> {
+    pub fn sync<S: IBLTKeySet<K>>(&self, other: &IBLT<K>, set: &mut S) -> Result<(), Box<Error>> {
         let mut copy = self.clone();
         copy.substract(other);
         for e in copy.iter() {
