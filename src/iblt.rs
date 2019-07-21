@@ -162,7 +162,7 @@ impl<K : IBLTKey> IBLT<K> {
     }
 }
 
-pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut Iterator<Item=&AdKey>) -> Vec<u16> {
+pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut Iterator<Item=&impl IBLTKey>) -> Vec<u16> {
     let ksequence = generate_ksequence(n, k0, k1);
     let mut min_hashes = vec![0xffff; n];
     for id in ids {
