@@ -71,7 +71,7 @@ impl<K : IBLTKey> IBLTKeySet<K> for HashSet<K> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct IBLT<K : IBLTKey> {
     buckets: Vec<Bucket<K>>,
     k0: u64,
@@ -80,7 +80,7 @@ pub struct IBLT<K : IBLTKey> {
     ksequence: Vec<(u64, u64)>
 }
 
-#[derive(Default,Clone)]
+#[derive(Default,Clone, Serialize, Deserialize)]
 struct Bucket<K : IBLTKey> {
     keysum: K,
     hashsum: u64,
@@ -162,19 +162,19 @@ impl<K : IBLTKey> IBLT<K> {
     }
 }
 
-pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut Iterator<Item=&impl IBLTKey>) -> Vec<u16> {
+pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut Iterator<Item=&impl IBLTKey>) -> Vec<u64> {
     let ksequence = generate_ksequence(n, k0, k1);
-    let mut min_hashes = vec![0xffff; n];
+    let mut min_hashes = vec![0xffffffffffffffff; n];
     for id in ids {
         for (i, (k0, k1)) in ksequence.iter().enumerate() {
-            min_hashes[i] = min(min_hashes[i], id.hash_to_u64_with_keys(*k0, *k1) as u16);
+            min_hashes[i] = min(min_hashes[i], id.hash_to_u64_with_keys(*k0, *k1) as u64);
         }
     }
     min_hashes
 }
 
 /// estimate difference size from two known sketches and sizes
-pub fn estimate_diff_size(sa: Vec<u16>, al: usize, sb: Vec<u16>, bl: usize) -> usize {
+pub fn estimate_diff_size(sa: &[u64], al: usize, sb: &[u64], bl: usize) -> usize {
     assert_eq!(sa.len(), sb.len());
     let k = sa.len();
     let r = sa.iter().zip(sb.iter()).filter(|(a, b)| *a == *b).count() as f32 / k as f32;
@@ -460,7 +460,7 @@ mod test {
         let b_sketch = min_sketch(10, k0, k1, &mut b.iter());
         let bl = b.len();
 
-        let buckets = estimate_diff_size(a_sketch, al, b_sketch, bl)*3/2;
+        let buckets = estimate_diff_size(a_sketch.as_slice(), al, b_sketch.as_slice(), bl)*3/2;
 
         let mut a_iblt = IBLT::new(buckets, 4, k0, k1);
         for id in a.iter() {
