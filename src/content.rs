@@ -8,9 +8,16 @@ use std::{
 };
 use crate::bitcoin::{
     Transaction,
+    Script,
+    blockdata::{
+        opcodes::all,
+        script::{Builder, Instruction}
+    },
     PublicKey,
     consensus,
-    BitcoinHash
+    BitcoinHash,
+    util::address::{Payload, Address},
+    network::constants::Network
 };
 
 use crate::bitcoin_hashes::{
@@ -26,7 +33,7 @@ use secp256k1::{Secp256k1, Signature, VerifyOnly, Message};
 use crate::iblt::IBLTKey;
 use crate::serde::{Serialize, Deserialize, Serializer, Deserializer};
 
-use byteorder::{ByteOrder, BigEndian};
+use byteorder::{ByteOrder, BigEndian, LittleEndian};
 
 const DIGEST_LEN: usize = secp256k1::constants::MESSAGE_SIZE;
 
@@ -83,10 +90,10 @@ pub struct Content {
     pub block_id: sha256d::Hash,
     /// SPV proof that the transaction is included into the block
     pub spv_proof: Vec<(bool, sha256d::Hash)>,
-    /// publisher
-    pub publisher: PublicKey,
-    /// signature of the publisher
-    pub signature: Signature
+    /// funder
+    pub funder: PublicKey,
+    /// term of funding in blocks
+    pub term: u16
 }
 
 impl Content {
@@ -94,10 +101,7 @@ impl Content {
     pub fn digest (&self) -> sha256::Hash {
         let mut hasher = sha256::Hash::engine();
         hasher.input(consensus::serialize(self.data.as_slice()).as_slice());
-        hasher.input(consensus::serialize(&self.funding).as_slice());
-        hasher.input(consensus::serialize(&self.block_id).as_slice());
-        hasher.input(consensus::serialize(&self.spv_proof).as_slice());
-        hasher.input(consensus::serialize(&self.publisher.to_bytes()).as_slice());
+        hasher.input(consensus::serialize(&self.funder.to_bytes()).as_slice());
         sha256::Hash::from_engine(hasher)
     }
 
@@ -117,8 +121,37 @@ impl Content {
         }) == *merkle_root
     }
 
-    /// is the signature of the publisher valid
-    pub fn is_valid_publisher_signature(&self, ctx: &Secp256k1<VerifyOnly>) -> bool{
-        ctx.verify(&Message::from_slice(&self.digest()[..]).unwrap(), &self.signature, &self.publisher.key).is_ok()
+    /// check if the funding transaction really funds this ad
+    pub fn is_valid_funding (&self, ctx: &Secp256k1<VerifyOnly>) -> bool {
+        let f_script = funding_script(&self.funder, &self.digest(), self.term, ctx);
+        self.funding.output.iter().any(|o| o.script_pubkey == f_script)
     }
+
+    pub fn is_valid (&self, merkle_root: &sha256d::Hash, ctx: &Secp256k1<VerifyOnly>) -> bool {
+        self.is_valid_funding(ctx) && self.is_valid_spv_proof(merkle_root)
+    }
+
+    pub fn weight (&self, ctx: &Secp256k1<VerifyOnly>) -> u32 {
+        let f_script = funding_script(&self.funder, &self.digest(), self.term, ctx);
+
+        (self.funding.output.iter().filter_map(|o| if o.script_pubkey == f_script { Some(o.value)} else {None}).sum::<u64>()
+            /
+        (self.data.len() + consensus::serialize(&self.funding).len() + self.spv_proof.len() * 32usize) as u64) as u32
+    }
+}
+
+pub fn funding_script (funder: &PublicKey, digest: &sha256::Hash, term: u16, ctx: &Secp256k1<VerifyOnly>) -> Script {
+    let mut tweaked = funder.clone();
+    tweaked.key.add_exp_assign(ctx, &digest[..]).unwrap();
+    let mut buf = [0u8; 4];
+    LittleEndian::write_u16(&mut buf, term | (1 << 22));
+
+    let script = Builder::new()
+        .push_slice(tweaked.to_bytes().as_slice())
+        .push_opcode(all::OP_CHECKSIGVERIFY)
+        .push_slice(&buf[0..3])
+        .push_opcode(all::OP_NOP3) // OP_CHECKSEQUENCEVERIFY
+        .into_script();
+
+    Address::p2wsh(&script, Network::Bitcoin).script_pubkey()
 }
