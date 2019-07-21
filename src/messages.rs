@@ -1,6 +1,6 @@
 //! P2P messages
 
-use crate::iblt::IBLTKey;
+use crate::iblt::AdKey;
 use crate::ad::Ad;
 use crate::bitcoin_hashes::sha256d;
 use crate::bitcoin_hashes::sha256;
@@ -11,7 +11,7 @@ use crate::serde::{Serializer, Serialize, Deserialize, Deserializer};
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Messages {
     Connect(ConnectMessage),
-    Substantiate(Vec<IBLTKey>),
+    Substantiate(Vec<AdKey>),
     InsertedID(InsertedIDMessage),
     GetAds(GetAdsMessage),
     Ad(Ad)

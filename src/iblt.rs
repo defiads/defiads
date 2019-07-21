@@ -13,52 +13,66 @@ use std::hash::Hasher;
 use byteorder::{WriteBytesExt, BigEndian,ByteOrder};
 use std::cmp::min;
 use std::ops::BitXorAssign;
-use std::ops::BitXor;
 use std::sync::Arc;
 
 const ID_LEN:usize = 32;
 
-/// IBLT stored IDs
+pub trait IBLTKey : BitXorAssign + Copy + Clone + Eq + PartialEq + Default + std::hash::Hash {
+    fn hash_to_u64_with_keys (&self, k0: u64, k1: u64) -> u64;
+}
+
+
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default, Serialize, Deserialize, Hash)]
-pub struct IBLTKey {
+pub struct AdKey {
     pub digest: [u8; ID_LEN],
     pub weight: u32
 }
 
-impl BitXorAssign for IBLTKey {
-    fn bitxor_assign(&mut self, rhs: IBLTKey) {
+impl IBLTKey for AdKey {
+    fn hash_to_u64_with_keys (&self, k0: u64, k1: u64) -> u64 {
+        let mut hasher = siphasher::sip::SipHasher::new_with_keys(k0, k1);
+        hasher.write(&self.digest[..]);
+        let mut buf = [0u8; 4];
+        BigEndian::write_u32(&mut buf, self.weight);
+        hasher.write(&buf);
+        hasher.finish()
+    }
+}
+
+impl BitXorAssign for AdKey {
+    fn bitxor_assign(&mut self, rhs: AdKey) {
         self.digest.iter_mut().zip(rhs.digest.iter()).for_each(|(a, b)| *a ^= b);
         self.weight ^= rhs.weight;
     }
 }
 
-impl IBLTKey {
-    pub fn new (hash: &[u8], weight: u32) -> IBLTKey {
+impl AdKey {
+    pub fn new (hash: &[u8], weight: u32) -> AdKey {
         assert_eq!(hash.len(), ID_LEN);
         let mut digest = [0u8; ID_LEN];
         digest.copy_from_slice(hash);
-        IBLTKey{digest, weight}
+        AdKey {digest, weight}
     }
 }
 
-pub trait IBLTKeySet {
-    fn insert (&mut self, id: IBLTKey) -> bool;
-    fn remove(&mut self, id: &IBLTKey) -> bool;
+pub trait IBLTKeySet<K : IBLTKey> {
+    fn insert (&mut self, id: K) -> bool;
+    fn remove(&mut self, id: &K) -> bool;
 }
 
-impl IBLTKeySet for HashSet<IBLTKey> {
-    fn insert(&mut self, id: IBLTKey) -> bool {
+impl<K : IBLTKey> IBLTKeySet<K> for HashSet<K> {
+    fn insert(&mut self, id: K) -> bool {
         self.insert(id)
     }
 
-    fn remove(&mut self, id: &IBLTKey) -> bool {
+    fn remove(&mut self, id: &K) -> bool {
         self.remove(id)
     }
 }
 
 #[derive(Clone)]
-pub struct IBLT {
-    buckets: Vec<Bucket>,
+pub struct IBLT<K : IBLTKey> {
+    buckets: Vec<Bucket<K>>,
     k0: u64,
     k1: u64,
     k: usize,
@@ -66,45 +80,30 @@ pub struct IBLT {
 }
 
 #[derive(Default,Clone)]
-struct Bucket {
-    keysum: IBLTKey,
+struct Bucket<K : IBLTKey> {
+    keysum: K,
     hashsum: u64,
     count: i32
 }
 
-impl IBLT {
-
-    fn generate_ksequence(k: usize, mut k0: u64, mut k1: u64) -> Vec<(u64, u64)> {
-        let mut ksequence = Vec::new();
-        let mut buf = [0u8;8];
-        ksequence.push((k0, k1));
-        for _ in 1..k {
-            BigEndian::write_u64(&mut buf, k0);
-            k0 = hash_slice_to_u64_with_keys(k0, k1, &buf);
-            BigEndian::write_u64(&mut buf, k1);
-            k1 = hash_slice_to_u64_with_keys(k0, k1, &buf);
-            ksequence.push((k0, k1));
-        }
-        ksequence
-    }
-
+impl<K : IBLTKey> IBLT<K> {
     /// Create a new IBLT with m buckets and k hash functions
-    pub fn new (m: usize, k: usize, k0: u64, k1: u64) -> IBLT {
+    pub fn new (m: usize, k: usize, k0: u64, k1: u64) -> IBLT<K> {
         IBLT{buckets: vec![Bucket::default();m], k0, k1, k,
-            ksequence: Arc::new(Self::generate_ksequence(k+1, k0, k1))}
+            ksequence: Arc::new(generate_ksequence(k+1, k0, k1))}
     }
 
-    fn hash (&self, n: usize, key: &IBLTKey) -> u64 {
+    fn hash (&self, n: usize, key: &K) -> u64 {
         let (k0, k1) = self.ksequence[n];
-        hash_to_u64_with_keys(k0, k1, key)
+        key.hash_to_u64_with_keys(k0, k1)
     }
 
-    fn buckets(&self, key: &IBLTKey) -> BucketIterator {
+    fn buckets(&self, key: &K) -> BucketIterator {
         BucketIterator::new(self, key)
     }
 
     /// insert an id
-    pub fn insert (&mut self, key: &IBLTKey) {
+    pub fn insert (&mut self, key: &K) {
         let keyhash = self.hash(0, key);
         for n in self.buckets(key) {
             let ref mut bucket = self.buckets[n];
@@ -115,7 +114,7 @@ impl IBLT {
     }
 
     /// delete an id
-    pub fn delete (&mut self, key: &IBLTKey) {
+    pub fn delete (&mut self, key: &K) {
         let keyhash = self.hash(0, key);
         for n in self.buckets(key) {
             let ref mut bucket = self.buckets[n];
@@ -126,17 +125,17 @@ impl IBLT {
     }
 
     /// iterate over ids. This preserves the IBLT as it makes a copy internally
-    pub fn iter(&self) -> IBLTIterator {
+    pub fn iter(&self) -> IBLTIterator<K> {
         IBLTIterator::new(self.clone())
     }
 
     /// iterare over ids. This destroys the IBLT
-    pub fn into_iter (self) -> IBLTIterator {
+    pub fn into_iter (self) -> IBLTIterator<K> {
         IBLTIterator::new(self)
     }
 
     /// substract an other IBLT from this
-    pub fn substract (&mut self, other: &IBLT)  {
+    pub fn substract (&mut self, other: &IBLT<K>)  {
         assert_eq!(self.buckets.len(), other.buckets.len());
         assert_eq!(self.k0, other.k0);
         assert_eq!(self.k1, other.k1);
@@ -149,7 +148,7 @@ impl IBLT {
         }
     }
 
-    pub fn sync(&self, other: &IBLT, set: &mut impl IBLTKeySet) -> Result<(), Box<Error>> {
+    pub fn sync(&self, other: &IBLT<K>, set: &mut impl IBLTKeySet<K>) -> Result<(), Box<Error>> {
         let mut copy = self.clone();
         copy.substract(other);
         for e in copy.iter() {
@@ -162,12 +161,12 @@ impl IBLT {
     }
 }
 
-pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut Iterator<Item=&IBLTKey>) -> Vec<u16> {
-    let ksequence = IBLT::generate_ksequence(n, k0, k1);
+pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut Iterator<Item=&AdKey>) -> Vec<u16> {
+    let ksequence = generate_ksequence(n, k0, k1);
     let mut min_hashes = vec![0xffff; n];
     for id in ids {
         for (i, (k0, k1)) in ksequence.iter().enumerate() {
-            min_hashes[i] = min(min_hashes[i], hash_to_u64_with_keys(*k0, *k1, id) as u16);
+            min_hashes[i] = min(min_hashes[i], id.hash_to_u64_with_keys(*k0, *k1) as u16);
         }
     }
     min_hashes
@@ -181,13 +180,20 @@ pub fn estimate_diff_size(sa: Vec<u16>, al: usize, sb: Vec<u16>, bl: usize) -> u
     ((1.0-r)/(1.0+r)*(al + bl) as f32) as usize
 }
 
-fn hash_to_u64_with_keys (k0: u64, k1: u64, id: &IBLTKey) -> u64 {
-    let mut hasher = siphasher::sip::SipHasher::new_with_keys(k0, k1);
-    hasher.write(&id.digest[..]);
-    let mut buf = [0u8; 4];
-    BigEndian::write_u32(&mut buf, id.weight);
-    hasher.write(&buf);
-    hasher.finish()
+
+
+fn generate_ksequence(k: usize, mut k0: u64, mut k1: u64) -> Vec<(u64, u64)> {
+    let mut ksequence = Vec::new();
+    let mut buf = [0u8;8];
+    ksequence.push((k0, k1));
+    for _ in 1..k {
+        BigEndian::write_u64(&mut buf, k0);
+        k0 = hash_slice_to_u64_with_keys(k0, k1, &buf);
+        BigEndian::write_u64(&mut buf, k1);
+        k1 = hash_slice_to_u64_with_keys(k0, k1, &buf);
+        ksequence.push((k0, k1));
+    }
+    ksequence
 }
 
 fn hash_slice_to_u64_with_keys (k0: u64, k1: u64, s: &[u8]) -> u64 {
@@ -202,11 +208,11 @@ struct BucketIterator {
 }
 
 impl BucketIterator {
-    fn new (iblt: &IBLT, key: &IBLTKey) -> BucketIterator {
+    fn new<K: IBLTKey> (iblt: &IBLT<K>, key: &K) -> BucketIterator {
         let mut buckets= Vec::new();
         let len = iblt.buckets.len();
         for (k0, k1) in iblt.ksequence.iter() {
-            buckets.push(hash_to_u64_with_keys(*k0, *k1, key) as usize % len);
+            buckets.push(key.hash_to_u64_with_keys(*k0, *k1) as usize % len);
         }
         buckets.sort();
         buckets.dedup();
@@ -246,19 +252,19 @@ impl fmt::Display for IBLTError {
 }
 
 #[derive(Eq, PartialEq, Debug)]
-pub enum IBLTEntry {
-    Inserted(IBLTKey),
-    Deleted(IBLTKey)
+pub enum IBLTEntry<K : IBLTKey> {
+    Inserted(K),
+    Deleted(K)
 }
 
-pub struct IBLTIterator {
-    iblt: IBLT,
+pub struct IBLTIterator<K : IBLTKey> {
+    iblt: IBLT<K>,
     queue: VecDeque<usize>,
     incomplete: bool
 }
 
-impl IBLTIterator {
-    pub fn new (iblt: IBLT) -> IBLTIterator {
+impl<K: IBLTKey> IBLTIterator<K> {
+    pub fn new (iblt: IBLT<K>) -> IBLTIterator<K> {
         let mut queue = VecDeque::new();
         for (i, bucket) in iblt.buckets.iter().enumerate() {
             if bucket.count.abs() == 1 &&
@@ -270,8 +276,8 @@ impl IBLTIterator {
     }
 }
 
-impl Iterator for IBLTIterator {
-    type Item = Result<IBLTEntry, IBLTError>;
+impl<K: IBLTKey> Iterator for IBLTIterator<K> {
+    type Item = Result<IBLTEntry<K>, IBLTError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.incomplete {
@@ -322,16 +328,16 @@ mod test {
     pub fn test_single_insert () {
         let mut a = IBLT::new(10, 3, 0, 0);
 
-        a.insert(&IBLTKey::new(&[1; ID_LEN], 0));
-        assert_eq!(a.iter().next().unwrap().unwrap(), IBLTEntry::Inserted(IBLTKey::new(&[1; ID_LEN], 0)));
+        a.insert(&AdKey::new(&[1; ID_LEN], 0));
+        assert_eq!(a.iter().next().unwrap().unwrap(), IBLTEntry::Inserted(AdKey::new(&[1; ID_LEN], 0)));
     }
 
     #[test]
     pub fn test_single_insert_delete () {
         let mut a = IBLT::new(10, 3, 0, 0);
 
-        a.insert(&IBLTKey::new(&[1; ID_LEN], 0));
-        a.delete(&IBLTKey::new(&[1; ID_LEN], 0));
+        a.insert(&AdKey::new(&[1; ID_LEN], 0));
+        a.delete(&AdKey::new(&[1; ID_LEN], 0));
         assert!(a.iter().next().is_none());
     }
 
@@ -342,7 +348,7 @@ mod test {
         let mut set = HashSet::new();
         for i in 0..20 {
             set.insert([i; ID_LEN]);
-            a.insert(&IBLTKey::new(&[i; ID_LEN], 0));
+            a.insert(&AdKey::new(&[i; ID_LEN], 0));
         }
 
         for id in a.iter().map(|e| e.unwrap()) {
@@ -361,11 +367,11 @@ mod test {
         let mut removed = HashSet::new();
         for i in 0..20 {
             inserted.insert([i; ID_LEN]);
-            a.insert(&IBLTKey::new(&[i; ID_LEN], 0));
+            a.insert(&AdKey::new(&[i; ID_LEN], 0));
         }
         for i in 10 .. 30 {
             removed.insert([i; ID_LEN]);
-            a.delete(&IBLTKey::new(&[i; ID_LEN], 0));
+            a.delete(&AdKey::new(&[i; ID_LEN], 0));
         }
 
         let mut remained = inserted.difference(&removed).collect::<HashSet<_>>();
@@ -393,7 +399,7 @@ mod test {
         let mut a_inserted = HashSet::new();
         for i in 0..20 {
             a_inserted.insert([i; ID_LEN]);
-            a.insert(&IBLTKey::new(&[i; ID_LEN], 0));
+            a.insert(&AdKey::new(&[i; ID_LEN], 0));
         }
 
         let mut b = IBLT::new(60, 3, 0, 0);
@@ -401,7 +407,7 @@ mod test {
         let mut b_inserted = HashSet::new();
         for i in 15..30 {
             b_inserted.insert([i; ID_LEN]);
-            b.insert(&IBLTKey::new(&[i; ID_LEN], 0));
+            b.insert(&AdKey::new(&[i; ID_LEN], 0));
         }
         a.substract(&b);
         assert_eq!(a.iter().filter(|r| if let Ok(IBLTEntry::Inserted(_)) = r { true } else {false} ).count(), 15);
@@ -412,7 +418,7 @@ mod test {
     pub fn test_overload() {
         let mut a = IBLT::new(10, 5, 0, 0);
         for i in 0..20 {
-            a.insert(&IBLTKey::new(&[i; ID_LEN], 0));
+            a.insert(&AdKey::new(&[i; ID_LEN], 0));
         }
         assert!(a.into_iter().any(|r|  r.is_err()));
     }
@@ -430,10 +436,10 @@ mod test {
             let mut t = [0u8; 32];
             t.copy_from_slice(&id[..]);
             if i >= 200 {
-                a.insert(IBLTKey::new(&t, 0));
+                a.insert(AdKey::new(&t, 0));
             }
             if i < 800 {
-                b.insert(IBLTKey::new(&t, 0));
+                b.insert(AdKey::new(&t, 0));
             }
             id = sha256::Hash::hash(&t);
         }
