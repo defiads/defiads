@@ -22,40 +22,6 @@ pub trait IBLTKey : BitXorAssign + Copy + Clone + Eq + PartialEq + Default + std
     fn hash_to_u64_with_keys (&self, k0: u64, k1: u64) -> u64;
 }
 
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Default, Serialize, Deserialize, Hash)]
-pub struct AdKey {
-    pub digest: [u8; ID_LEN],
-    pub weight: u32
-}
-
-impl IBLTKey for AdKey {
-    fn hash_to_u64_with_keys (&self, k0: u64, k1: u64) -> u64 {
-        let mut hasher = siphasher::sip::SipHasher::new_with_keys(k0, k1);
-        hasher.write(&self.digest[..]);
-        let mut buf = [0u8; 4];
-        BigEndian::write_u32(&mut buf, self.weight);
-        hasher.write(&buf);
-        hasher.finish()
-    }
-}
-
-impl BitXorAssign for AdKey {
-    fn bitxor_assign(&mut self, rhs: AdKey) {
-        self.digest.iter_mut().zip(rhs.digest.iter()).for_each(|(a, b)| *a ^= b);
-        self.weight ^= rhs.weight;
-    }
-}
-
-impl AdKey {
-    pub fn new (hash: &[u8], weight: u32) -> AdKey {
-        assert_eq!(hash.len(), ID_LEN);
-        let mut digest = [0u8; ID_LEN];
-        digest.copy_from_slice(hash);
-        AdKey {digest, weight}
-    }
-}
-
 pub trait IBLTKeySet<K : IBLTKey> {
     fn insert (&mut self, id: K) -> bool;
     fn remove(&mut self, id: &K) -> bool;
@@ -330,21 +296,22 @@ impl<K: IBLTKey> Iterator for IBLTIterator<K> {
 mod test {
     use super::*;
     use std::collections::HashSet;
+    use crate::content::ContentKey;
 
     #[test]
     pub fn test_single_insert () {
         let mut a = IBLT::new(10, 3, 0, 0);
 
-        a.insert(&AdKey::new(&[1; ID_LEN], 0));
-        assert_eq!(a.iter().next().unwrap().unwrap(), IBLTEntry::Inserted(AdKey::new(&[1; ID_LEN], 0)));
+        a.insert(&ContentKey::new(&[1; ID_LEN], 0));
+        assert_eq!(a.iter().next().unwrap().unwrap(), IBLTEntry::Inserted(ContentKey::new(&[1; ID_LEN], 0)));
     }
 
     #[test]
     pub fn test_single_insert_delete () {
         let mut a = IBLT::new(10, 3, 0, 0);
 
-        a.insert(&AdKey::new(&[1; ID_LEN], 0));
-        a.delete(&AdKey::new(&[1; ID_LEN], 0));
+        a.insert(&ContentKey::new(&[1; ID_LEN], 0));
+        a.delete(&ContentKey::new(&[1; ID_LEN], 0));
         assert!(a.iter().next().is_none());
     }
 
@@ -355,7 +322,7 @@ mod test {
         let mut set = HashSet::new();
         for i in 0..20 {
             set.insert([i; ID_LEN]);
-            a.insert(&AdKey::new(&[i; ID_LEN], 0));
+            a.insert(&ContentKey::new(&[i; ID_LEN], 0));
         }
 
         for id in a.iter().map(|e| e.unwrap()) {
@@ -374,11 +341,11 @@ mod test {
         let mut removed = HashSet::new();
         for i in 0..20 {
             inserted.insert([i; ID_LEN]);
-            a.insert(&AdKey::new(&[i; ID_LEN], 0));
+            a.insert(&ContentKey::new(&[i; ID_LEN], 0));
         }
         for i in 10 .. 30 {
             removed.insert([i; ID_LEN]);
-            a.delete(&AdKey::new(&[i; ID_LEN], 0));
+            a.delete(&ContentKey::new(&[i; ID_LEN], 0));
         }
 
         let mut remained = inserted.difference(&removed).collect::<HashSet<_>>();
@@ -406,7 +373,7 @@ mod test {
         let mut a_inserted = HashSet::new();
         for i in 0..20 {
             a_inserted.insert([i; ID_LEN]);
-            a.insert(&AdKey::new(&[i; ID_LEN], 0));
+            a.insert(&ContentKey::new(&[i; ID_LEN], 0));
         }
 
         let mut b = IBLT::new(60, 3, 0, 0);
@@ -414,7 +381,7 @@ mod test {
         let mut b_inserted = HashSet::new();
         for i in 15..30 {
             b_inserted.insert([i; ID_LEN]);
-            b.insert(&AdKey::new(&[i; ID_LEN], 0));
+            b.insert(&ContentKey::new(&[i; ID_LEN], 0));
         }
         a.substract(&b);
         assert_eq!(a.iter().filter(|r| if let Ok(IBLTEntry::Inserted(_)) = r { true } else {false} ).count(), 15);
@@ -425,7 +392,7 @@ mod test {
     pub fn test_overload() {
         let mut a = IBLT::new(10, 5, 0, 0);
         for i in 0..20 {
-            a.insert(&AdKey::new(&[i; ID_LEN], 0));
+            a.insert(&ContentKey::new(&[i; ID_LEN], 0));
         }
         assert!(a.into_iter().any(|r|  r.is_err()));
     }
@@ -443,10 +410,10 @@ mod test {
             let mut t = [0u8; 32];
             t.copy_from_slice(&id[..]);
             if i >= 200 {
-                a.insert(AdKey::new(&t, 0));
+                a.insert(ContentKey::new(&t, 0));
             }
             if i < 800 {
-                b.insert(AdKey::new(&t, 0));
+                b.insert(ContentKey::new(&t, 0));
             }
             id = sha256::Hash::hash(&t);
         }

@@ -17,8 +17,10 @@ extern crate hex;
 extern crate bitcoin_hashes;
 extern crate bitcoin;
 extern crate siphasher;
+extern crate secp256k1;
 
 mod text;
 mod ad;
 mod iblt;
 mod messages;
+mod content;

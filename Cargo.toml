@@ -12,6 +12,7 @@ serde_derive = "1"
 serde_cbor = "0.10"
 bitcoin_hashes={version="0.3", features=["serde"]}
 bitcoin={version="0.18", features=["serde"]}
+secp256k1={version="0.12", features=["rand", "serde"]}
 siphasher="0.3"
 
 [dev-dependencies]
