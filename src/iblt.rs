@@ -14,6 +14,8 @@ use byteorder::{WriteBytesExt, BigEndian,ByteOrder};
 use std::cmp::min;
 use std::ops::BitXorAssign;
 
+const K_MAX: usize = 6;
+
 const ID_LEN:usize = 32;
 
 pub trait IBLTKey : BitXorAssign + Copy + Clone + Eq + PartialEq + Default + std::hash::Hash {
@@ -88,6 +90,7 @@ struct Bucket<K : IBLTKey> {
 impl<K : IBLTKey> IBLT<K> {
     /// Create a new IBLT with m buckets and k hash functions
     pub fn new (m: usize, k: usize, k0: u64, k1: u64) -> IBLT<K> {
+        assert!(k <= K_MAX);
         IBLT{buckets: vec![Bucket::default();m], k0, k1, k,
             ksequence: generate_ksequence(k, k0, k1)}
     }
@@ -200,20 +203,22 @@ fn hash_slice_to_u64_with_keys (k0: u64, k1: u64, s: &[u8]) -> u64 {
 }
 
 struct BucketIterator {
-    buckets: Vec<usize>,
-    pos: usize
+    buckets: [usize; K_MAX],
+    pos: usize,
+    last: usize,
+    k: usize
 }
 
 impl BucketIterator {
     fn new<K: IBLTKey> (iblt: &IBLT<K>, key: &K) -> BucketIterator {
-        let mut buckets= Vec::new();
+        let mut buckets= [0usize; K_MAX];
         let len = iblt.buckets.len();
-        for (k0, k1) in iblt.ksequence.iter() {
-            buckets.push(key.hash_to_u64_with_keys(*k0, *k1) as usize % len);
+        for (i, (k0, k1)) in iblt.ksequence.iter().enumerate() {
+            buckets [i] = key.hash_to_u64_with_keys(*k0, *k1) as usize % len;
         }
-        buckets.sort();
-        buckets.dedup();
-        BucketIterator{buckets, pos: 0}
+        let k = iblt.ksequence.len();
+        buckets[0..k].sort();
+        BucketIterator{buckets, pos: 0, last: 0, k}
     }
 }
 
@@ -221,12 +226,17 @@ impl Iterator for BucketIterator {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos == self.buckets.len() {
+        if self.pos > 0 {
+            while self.pos < self.k && self.last == self.buckets[self.pos] {
+                self.pos += 1;
+            }
+        }
+        if self.pos == self.k {
             return None;
         }
-        let b = self.buckets[self.pos];
+        self.last = self.buckets[self.pos];
         self.pos += 1;
-        Some(b)
+        Some(self.last)
     }
 }
 
