@@ -13,7 +13,6 @@ use std::hash::Hasher;
 use byteorder::{WriteBytesExt, BigEndian,ByteOrder};
 use std::cmp::min;
 use std::ops::BitXorAssign;
-use std::sync::Arc;
 
 const ID_LEN:usize = 32;
 
@@ -76,7 +75,7 @@ pub struct IBLT<K : IBLTKey> {
     k0: u64,
     k1: u64,
     k: usize,
-    ksequence: Arc<Vec<(u64, u64)>>
+    ksequence: Vec<(u64, u64)>
 }
 
 #[derive(Default,Clone)]
@@ -90,7 +89,7 @@ impl<K : IBLTKey> IBLT<K> {
     /// Create a new IBLT with m buckets and k hash functions
     pub fn new (m: usize, k: usize, k0: u64, k1: u64) -> IBLT<K> {
         IBLT{buckets: vec![Bucket::default();m], k0, k1, k,
-            ksequence: Arc::new(generate_ksequence(k+1, k0, k1))}
+            ksequence: generate_ksequence(k+1, k0, k1)}
     }
 
     fn hash (&self, n: usize, key: &K) -> u64 {
@@ -174,7 +173,7 @@ pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut Iterator<Item=&AdKey>) ->
 
 /// estimate difference size from two known sketches and sizes
 pub fn estimate_diff_size(sa: Vec<u16>, al: usize, sb: Vec<u16>, bl: usize) -> usize {
-    assert!(sa.len() == sb.len());
+    assert_eq!(sa.len(), sb.len());
     let k = sa.len();
     let r = sa.iter().zip(sb.iter()).filter(|(a, b)| *a == *b).count() as f32 / k as f32;
     ((1.0-r)/(1.0+r)*(al + bl) as f32) as usize
