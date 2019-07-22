@@ -105,8 +105,8 @@ impl Content {
     /// calculate the digest that identifies this content
     pub fn digest (&self) -> sha256::Hash {
         let mut hasher = sha256::Hash::engine();
-        hasher.input(consensus::serialize(self.data.as_slice()).as_slice());
-        hasher.input(consensus::serialize(&self.funder.to_bytes()).as_slice());
+        hasher.input(self.data.as_slice());
+        hasher.input(&self.funder.to_bytes().as_slice());
         sha256::Hash::from_engine(hasher)
     }
 
@@ -126,16 +126,16 @@ impl Content {
         }) == *merkle_root
     }
 
-    pub fn length(&self) -> u32 {
-        serde_cbor::to_vec(self).len() as u32
+    pub fn length(&self) -> Result<u32, Box<dyn error::Error>> {
+        Ok(serde_cbor::to_vec(self)?.len() as u32)
     }
 
     /// return ratio of funding and size
-    pub fn weight (&self, ctx: &Secp256k1<VerifyOnly>) -> u32 {
+    pub fn weight (&self, ctx: &Secp256k1<VerifyOnly>) -> Result<u32, Box<dyn error::Error>> {
         let f_script = funding_script(&self.funder, &self.digest(), self.term, ctx);
 
-        (self.funding.output.iter().filter_map(|o| if o.script_pubkey == f_script { Some(o.value)} else {None}).sum::<u64>()
-            / self.length() as u64) as u32
+        Ok((self.funding.output.iter().filter_map(|o| if o.script_pubkey == f_script { Some(o.value)} else {None}).sum::<u64>()
+            / self.length()? as u64) as u32)
     }
 }
 
