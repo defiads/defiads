@@ -25,3 +25,4 @@ mod ad;
 mod iblt;
 mod messages;
 mod content;
+mod funding;
