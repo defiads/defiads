@@ -18,6 +18,7 @@ extern crate bitcoin_hashes;
 extern crate bitcoin;
 extern crate siphasher;
 extern crate secp256k1;
+extern crate rand;
 
 mod text;
 mod ad;

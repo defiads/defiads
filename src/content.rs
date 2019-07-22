@@ -11,9 +11,12 @@ use crate::bitcoin::{
     Script,
     blockdata::{
         opcodes::all,
-        script::Builder
+        script::Builder,
+        transaction::{TxIn, TxOut, OutPoint, SigHashType}
     },
+    util::bip143,
     PublicKey,
+    PrivateKey,
     BitcoinHash,
     util::address::Address,
     network::constants::Network
@@ -27,7 +30,9 @@ use crate::bitcoin_hashes::{
     hex::ToHex
 };
 
-use secp256k1::{Secp256k1, VerifyOnly};
+use rand::{thread_rng, prelude::SliceRandom};
+
+use secp256k1::{Secp256k1, All, Message};
 
 use crate::iblt::IBLTKey;
 
@@ -110,7 +115,7 @@ impl Content {
 
     /// check if the spv proof is correct
     pub fn is_valid_spv_proof(&self, merkle_root: &sha256d::Hash) -> bool {
-        self.spv_proof.iter().fold(self.funding.bitcoin_hash(), |a, (left, b)| {
+        self.spv_proof.iter().fold(self.funding.txid(), |a, (left, b)| {
             let mut hasher = sha256::Hash::engine();
             if *left {
                 hasher.input(&b[..]);
@@ -129,19 +134,78 @@ impl Content {
     }
 
     /// return ratio of funding and size
-    pub fn weight (&self, ctx: &Secp256k1<VerifyOnly>) -> Result<u32, Box<dyn error::Error>> {
+    pub fn weight (&self, ctx: &Secp256k1<All>) -> Result<u32, Box<dyn error::Error>> {
         let f_script = funding_script(&self.funder, &self.digest(), self.term, ctx);
 
         Ok((self.funding.output.iter().filter_map(|o| if o.script_pubkey == f_script { Some(o.value)} else {None}).sum::<u64>()
             / self.length()? as u64) as u32)
     }
+
+    pub fn spend_funding (&self, secret: &PrivateKey, target: Address, amount: u64, fee: u64, change: Address, ctx: &Secp256k1<All>)
+        -> Result<Transaction, Box<dyn error::Error>> {
+        let txid = self.funding.bitcoin_hash();
+        // find funding output
+        let f_script = funding_script(&self.funder, &self.digest(), self.term, ctx);
+        let spend = self.funding.output.iter().enumerate()
+            .filter_map(|(vout, o)| if o.script_pubkey == f_script { Some((vout, o.clone()))} else {None})
+            .collect::<Vec<(usize, TxOut)>>();
+        let input_amount = spend.iter().map(|(_, o)| o.value).sum::<u64>();
+        let mut outputs = Vec::new();
+        if target == change {
+            outputs.push(TxOut{
+                value: input_amount - fee,
+                script_pubkey: target.script_pubkey()
+            });
+        }
+        else {
+            outputs.push(TxOut{
+                value: amount,
+                script_pubkey: target.script_pubkey()
+            });
+            outputs.push(TxOut{
+                value: input_amount - amount - fee,
+                script_pubkey: change.script_pubkey()
+            });
+            outputs.shuffle(&mut thread_rng());
+        }
+
+        let inputs = spend.iter().map(|(vout, _)| TxIn{
+            previous_output: OutPoint{txid, vout: *vout as u32},
+            script_sig: Builder::new().into_script(),
+            sequence: self.term as u32 | (1 << 22),
+            witness: Vec::new()
+        }).collect::<Vec<TxIn>>();
+
+        let mut tx = Transaction{
+            version: 2,
+            lock_time: self.term as u32 | (1 << 22),
+            input: inputs,
+            output: outputs
+        };
+
+        let mut secret = secret.key.clone();
+        secret.add_assign(&self.digest()[..])?;
+
+        let mut sigs = Vec::new();
+        for (i, input) in tx.input.iter().enumerate() {
+            let hash = bip143::SighashComponents::new(&tx).sighash_all(&input, &f_script, spend[i].1.value);
+            let mut sig = ctx.sign(&Message::from_slice(&hash[..]).unwrap(), &secret).serialize_der();
+            sig.push(SigHashType::All as u8);
+            sigs.push(sig);
+        }
+        for (i, input) in tx.input.iter_mut().enumerate() {
+            input.witness.push(sigs[i].clone());
+            input.witness.push(f_script.to_bytes());
+        }
+        Ok(tx)
+    }
 }
 
-pub fn funding_script (funder: &PublicKey, digest: &sha256::Hash, term: u16, ctx: &Secp256k1<VerifyOnly>) -> Script {
+pub fn funding_script (funder: &PublicKey, digest: &sha256::Hash, term: u16, ctx: &Secp256k1<All>) -> Script {
     let mut tweaked = funder.clone();
     tweaked.key.add_exp_assign(ctx, &digest[..]).unwrap();
     let mut buf = [0u8; 4];
-    LittleEndian::write_u16(&mut buf, term | (1 << 22));
+    LittleEndian::write_u32(&mut buf, term as u32 | (1 << 22));
 
     let script = Builder::new()
         .push_slice(tweaked.to_bytes().as_slice())
@@ -151,4 +215,9 @@ pub fn funding_script (funder: &PublicKey, digest: &sha256::Hash, term: u16, ctx
         .into_script();
 
     Address::p2wsh(&script, Network::Bitcoin).script_pubkey()
+}
+
+#[cfg(test)]
+mod test {
+
 }
