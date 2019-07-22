@@ -5,12 +5,11 @@ use std::collections::{
     hash_set::HashSet,
     vec_deque::VecDeque
 };
-use std::io::Write;
 use std::error::Error;
 use std::fmt;
 use std::hash::Hasher;
 
-use byteorder::{WriteBytesExt, BigEndian,ByteOrder};
+use byteorder::{BigEndian,ByteOrder};
 use std::cmp::min;
 use std::ops::BitXorAssign;
 
@@ -115,7 +114,7 @@ impl<K : IBLTKey> IBLT<K> {
         }
     }
 
-    pub fn sync<S: IBLTKeySet<K>>(&self, other: &IBLT<K>, set: &mut S) -> Result<(), Box<Error>> {
+    pub fn sync<S: IBLTKeySet<K>>(&self, other: &IBLT<K>, set: &mut S) -> Result<(), Box<dyn Error>> {
         let mut copy = self.clone();
         copy.substract(other);
         for e in copy.iter() {
@@ -128,7 +127,7 @@ impl<K : IBLTKey> IBLT<K> {
     }
 }
 
-pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut Iterator<Item=&impl IBLTKey>) -> Vec<u64> {
+pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut dyn Iterator<Item=&impl IBLTKey>) -> Vec<u64> {
     let ksequence = generate_ksequence(n, k0, k1);
     let mut min_hashes = vec![0xffffffffffffffff; n];
     for id in ids {

@@ -11,12 +11,11 @@ use crate::bitcoin::{
     Script,
     blockdata::{
         opcodes::all,
-        script::{Builder, Instruction}
+        script::Builder
     },
     PublicKey,
-    consensus,
     BitcoinHash,
-    util::address::{Payload, Address},
+    util::address::Address,
     network::constants::Network
 };
 
@@ -28,10 +27,9 @@ use crate::bitcoin_hashes::{
     hex::ToHex
 };
 
-use secp256k1::{Secp256k1, Signature, VerifyOnly, Message};
+use secp256k1::{Secp256k1, VerifyOnly};
 
 use crate::iblt::IBLTKey;
-use crate::serde::{Serialize, Deserialize, Serializer, Deserializer};
 
 use byteorder::{ByteOrder, BigEndian, LittleEndian};
 
@@ -71,7 +69,7 @@ impl IBLTKey for ContentKey {
 
 impl fmt::Debug for ContentKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "ContentKey{{ digest: {} weight: {} }}", self.digest.to_hex(), self.weight)
+        write!(f, "ContentKey{{ digest: {} weight: {} }} ", self.digest.to_hex(), self.weight)
     }
 }
 

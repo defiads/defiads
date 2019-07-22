@@ -3,8 +3,7 @@
 use std::error::Error;
 
 use crate::text::Text;
-use crate::serde::{Serialize, Deserialize};
-use crate::bitcoin_hashes::{sha256, Hash, HashEngine};
+use crate::bitcoin_hashes::{sha256, Hash};
 
 /// An ad
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
@@ -20,7 +19,7 @@ impl Ad {
     }
 
     /// deserealize an ad from a byte stream
-    pub fn deserialize(data: &[u8]) -> Result<Ad, Box<Error>> {
+    pub fn deserialize(data: &[u8]) -> Result<Ad, Box<dyn Error>> {
         Ok(serde_cbor::from_slice::<Ad>(data)?)
     }
 

@@ -1,11 +1,6 @@
 //! P2P messages
 
-use crate::content::ContentKey;
-
 use crate::bitcoin_hashes::sha256d;
-use crate::bitcoin_hashes::sha256;
-use crate::bitcoin::blockdata::transaction::Transaction;
-use crate::serde::{Serializer, Serialize, Deserialize, Deserializer};
 
 /// All P2P messages supported
 #[derive(Serialize, Deserialize, Debug)]

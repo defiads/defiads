@@ -3,7 +3,6 @@
 use std::error::Error;
 use std::io::{self, Write, Read, Cursor};
 use byteorder::{LittleEndian, WriteBytesExt, ReadBytesExt};
-use serde::{Serialize, Deserialize};
 
 /// A text object that stores a string in space saving encoding
 /// currently UTF-8 or UTF-16 with or without snappy compression
@@ -13,10 +12,10 @@ pub struct Text {
 }
 
 // default encoding is UTF-8 uncompressed
-/// uses UTF-16 encoding
-pub const UTF_16:u8 = 1;
-/// uses compressed encoding
-pub const COMPRESSED:u8 = 2;
+// uses UTF-16 encoding
+const UTF_16:u8 = 1;
+// uses compressed encoding
+const COMPRESSED:u8 = 2;
 
 impl Text {
     /// create a new text from a string
