@@ -23,8 +23,6 @@ use crate::byteorder::{LittleEndian, ByteOrder};
 
 use crate::rand::{thread_rng, prelude::SliceRandom};
 
-use crate::ad::Ad;
-
 pub fn funding_script (funder: &PublicKey, digest: &sha256::Hash, term: u16, ctx: &Secp256k1<All>) -> Script {
     let mut tweaked = funder.clone();
     tweaked.key.add_exp_assign(ctx, &digest[..]).unwrap();
@@ -42,9 +40,8 @@ pub fn funding_script (funder: &PublicKey, digest: &sha256::Hash, term: u16, ctx
 }
 
 /// spend a previously used funding
-pub fn spend_funding (ad: &Ad, term: u16, funding: &Transaction, secret: &PrivateKey, target: Address, amount: u64, fee: u64, change: Address, ctx: &Secp256k1<All>)
+pub fn spend_funding (digest: &sha256::Hash, term: u16, funding: &Transaction, secret: &PrivateKey, target: Address, amount: u64, fee: u64, change: Address, ctx: &Secp256k1<All>)
                       -> Result<Transaction, Box<dyn error::Error>> {
-    let digest = ad.digest();
     let mut secret = secret.clone();
     secret.key.add_assign(&digest[..])?;
 
@@ -108,4 +105,3 @@ pub struct FundingRequest {
     pub interest_cap: u64,
     pub change: Address
 }
-
