@@ -30,6 +30,8 @@ use crate::bitcoin_hashes::{
     hex::ToHex
 };
 
+use crate::ad::Ad;
+
 use rand::{thread_rng, prelude::SliceRandom};
 
 use secp256k1::{Secp256k1, All, Message};
@@ -88,10 +90,10 @@ impl ContentKey {
 }
 
 /// replicated content
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Content {
-    /// content data
-    pub data: Vec<u8>,
+    /// content ad
+    pub ad: Ad,
     /// funding transaction
     pub funding: Transaction,
     /// block id the transaction was included into
@@ -105,13 +107,6 @@ pub struct Content {
 }
 
 impl Content {
-    /// calculate the digest that identifies this content
-    pub fn digest (&self) -> sha256::Hash {
-        let mut hasher = sha256::Hash::engine();
-        hasher.input(self.data.as_slice());
-        hasher.input(&self.funder.to_bytes().as_slice());
-        sha256::Hash::from_engine(hasher)
-    }
 
     /// check if the spv proof is correct
     pub fn is_valid_spv_proof(&self, merkle_root: &sha256d::Hash) -> bool {
@@ -135,7 +130,7 @@ impl Content {
 
     /// return ratio of funding and size
     pub fn weight (&self, ctx: &Secp256k1<All>) -> Result<u32, Box<dyn error::Error>> {
-        let f_script = funding_script(&self.funder, &self.digest(), self.term, ctx);
+        let f_script = funding_script(&self.funder, &self.ad.digest(), self.term, ctx);
 
         Ok((self.funding.output.iter().filter_map(|o| if o.script_pubkey == f_script { Some(o.value)} else {None}).sum::<u64>()
             / self.length()? as u64) as u32)
@@ -145,7 +140,7 @@ impl Content {
         -> Result<Transaction, Box<dyn error::Error>> {
         let txid = self.funding.bitcoin_hash();
         // find funding output
-        let f_script = funding_script(&self.funder, &self.digest(), self.term, ctx);
+        let f_script = funding_script(&self.funder, &self.ad.digest(), self.term, ctx);
         let spend = self.funding.output.iter().enumerate()
             .filter_map(|(vout, o)| if o.script_pubkey == f_script { Some((vout, o.clone()))} else {None})
             .collect::<Vec<(usize, TxOut)>>();
@@ -184,7 +179,7 @@ impl Content {
         };
 
         let mut secret = secret.key.clone();
-        secret.add_assign(&self.digest()[..])?;
+        secret.add_assign(&self.ad.digest()[..])?;
 
         let mut sigs = Vec::new();
         for (i, input) in tx.input.iter().enumerate() {

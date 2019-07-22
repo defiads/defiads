@@ -23,7 +23,7 @@ impl Ad {
         Ok(serde_cbor::from_slice::<Ad>(data)?)
     }
 
-    pub fn commitment (&self) -> sha256::Hash {
+    pub fn digest(&self) -> sha256::Hash {
         sha256::Hash::hash(self.serialize().as_slice())
     }
 }
@@ -97,7 +97,7 @@ mod test {
                     }
                 ]};
 
-        println!("Ad {:?}\nhas commitment {}", ad, hex::encode(&ad.commitment()[..]));
+        println!("Ad {:?}\nhas commitment {}", ad, hex::encode(&ad.digest()[..]));
         println!("Ad serialized to {}", hex::encode(ad.serialize()));
         assert_eq!(Ad::deserialize(ad.serialize().as_slice()).unwrap(), ad);
         println!("Deserealized to same content.")
