@@ -19,14 +19,14 @@ use crate::bitcoin_hashes::{
     hex::ToHex
 };
 
+use crate::bitcoin_wallet::{
+    wallet::ProvedTransaction
+};
+
 use crate::ad::Ad;
-
 use crate::secp256k1::{Secp256k1, All};
-
 use crate::iblt::IBLTKey;
-
 use crate::byteorder::{ByteOrder, LittleEndian};
-
 use crate::funding::funding_script;
 
 const DIGEST_LEN: usize = secp256k1::constants::MESSAGE_SIZE;
@@ -84,34 +84,14 @@ pub struct Content {
     /// content ad
     pub ad: Ad,
     /// funding transaction
-    pub funding: Transaction,
-    /// block id the transaction was included into
-    pub block_id: sha256d::Hash,
-    /// SPV proof that the transaction is included into the block
-    pub spv_proof: Vec<(bool, sha256d::Hash)>,
+    pub funding: ProvedTransaction,
     /// funder
     pub funder: PublicKey,
-    /// term of funding in blocks
+    /// term of funding in blocks (around 455 days max)
     pub term: u16
 }
 
 impl Content {
-
-    /// check if the spv proof is correct
-    pub fn is_valid_spv_proof(&self, merkle_root: &sha256d::Hash) -> bool {
-        self.spv_proof.iter().fold(self.funding.txid(), |a, (left, b)| {
-            let mut hasher = sha256::Hash::engine();
-            if *left {
-                hasher.input(&b[..]);
-                hasher.input(&a[..]);
-            }
-            else {
-                hasher.input(&a[..]);
-                hasher.input(&b[..]);
-            }
-            sha256d::Hash::from_engine(hasher)
-        }) == *merkle_root
-    }
 
     pub fn length(&self) -> Result<u32, Box<dyn error::Error>> {
         Ok(serde_cbor::to_vec(self)?.len() as u32)
@@ -121,7 +101,7 @@ impl Content {
     pub fn weight (&self, ctx: &Secp256k1<All>) -> Result<u32, Box<dyn error::Error>> {
         let f_script = funding_script(&self.funder, &self.ad.digest(), self.term, ctx);
 
-        Ok((self.funding.output.iter().filter_map(|o| if o.script_pubkey == f_script { Some(o.value)} else {None}).sum::<u64>()
+        Ok((self.funding.get_transaction().output.iter().filter_map(|o| if o.script_pubkey == f_script { Some(o.value)} else {None}).sum::<u64>()
             / self.length()? as u64) as u32)
     }
 }
