@@ -47,6 +47,16 @@ pub struct ContentStore {
 }
 
 impl ContentStore {
+    /// new content store
+    pub fn new() -> ContentStore {
+        ContentStore {
+            ctx: Secp256k1::new(),
+            trans_store: Vec::new(),
+            proofs: HashMap::new(),
+            headers: Vec::new()
+        }
+    }
+
     /// get the tip hash of the header chain
     pub fn get_tip (&self) -> Option<&BlockHeader> {
         self.headers.last()
@@ -60,11 +70,11 @@ impl ContentStore {
     /// add a header to the tip of the chain
     /// the caller should do SPV check and evtl. unwind
     /// before adding this header after a reorg.
-    pub fn add_header(&mut self, header: BlockHeader) -> Result<(), BiadNetError> {
+    pub fn add_header(&mut self, header: &BlockHeader) -> Result<(), BiadNetError> {
         if self.headers.len() > 0 {
             // only append to tip
             if self.get_tip().unwrap().bitcoin_hash() == header.prev_blockhash {
-                self.headers.push(header);
+                self.headers.push(header.clone());
             }
             else {
                 return Err(BiadNetError::Unsupported("only add header connected to tip"));
@@ -72,7 +82,7 @@ impl ContentStore {
         }
         else {
             // add genesis
-            self.headers.push(header);
+            self.headers.push(header.clone());
         }
         Ok(())
     }
@@ -116,10 +126,12 @@ impl ContentStore {
         if let Some(ref h) = self.headers.get(height as usize) {
             if h.merkle_root == content.funding.merkle_root() {
                 let t = content.funding.get_transaction();
-                let commitment = funding_script(&content.funder, &content.ad.digest(), content.term, &self.ctx);
-                if let Some((vout, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
-                    return Ok(self.add_to_trans_store(content, o.value, OutPoint{txid: t.txid(), vout: vout as u32})?)
-                    // TODO persistent store
+                if t.version as u32 >= 2 {
+                    let commitment = funding_script(&content.funder, &content.ad.digest(), content.term, &self.ctx);
+                    if let Some((vout, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
+                        return Ok(self.add_to_trans_store(content, o.value, OutPoint { txid: t.txid(), vout: vout as u32 })?)
+                        // TODO persistent store
+                    }
                 }
             }
         }
