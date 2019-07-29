@@ -1,33 +1,36 @@
+//
+// Copyright 2019 Tamas Blummer
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+
 //! distributed content
-
-use std::{
-    ops::BitXorAssign,
-    hash::Hasher,
-    fmt,
-    error
-};
-use crate::bitcoin::{
-    Transaction,
-    PublicKey,
-};
-
-use crate::bitcoin_hashes::{
-    sha256d,
-    sha256,
-    Hash,
-    HashEngine,
-    hex::ToHex
-};
+use crate::bitcoin::PublicKey;
 
 use crate::bitcoin_wallet::{
-    wallet::ProvedTransaction
+    proved::ProvedTransaction
 };
 
 use crate::ad::Ad;
-use crate::secp256k1::{Secp256k1, All};
 use crate::iblt::IBLTKey;
 use crate::byteorder::{ByteOrder, LittleEndian};
-use crate::funding::funding_script;
+
+use std::{
+    error,
+    ops::BitXorAssign,
+    hash::Hasher,
+    fmt
+};
 
 const DIGEST_LEN: usize = secp256k1::constants::MESSAGE_SIZE;
 
@@ -38,14 +41,14 @@ pub struct ContentKey {
     pub digest: [u8; DIGEST_LEN],
     /// content length
     pub length: u32,
-    /// content weight (funding/length)
-    pub weight: u32
+    /// content funding amount
+    pub funding: u64
 }
 
 impl BitXorAssign for ContentKey {
     fn bitxor_assign(&mut self, rhs: ContentKey) {
         self.length ^= rhs.length;
-        self.weight ^= rhs.weight;
+        self.funding ^= rhs.funding;
         self.digest.iter_mut().zip(rhs.digest.iter()).for_each(|(a, b)| *a ^= b);
     }
 }
@@ -56,25 +59,27 @@ impl IBLTKey for ContentKey {
         let mut buf = [0u8; 4];
         LittleEndian::write_u32(&mut buf, self.length);
         hasher.write(&buf);
-        LittleEndian::write_u32(&mut buf, self.weight);
+        let mut buf = [0u8; 8];
+        LittleEndian::write_u64(&mut buf, self.funding);
         hasher.write(&buf);
         hasher.write(&self.digest[..]);
         hasher.finish()
     }
 }
 
+#[cfg(test)]
 impl fmt::Debug for ContentKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "ContentKey{{ digest: {} weight: {} }} ", self.digest.to_hex(), self.weight)
+        write!(f, "ContentKey{{ digest: {} funding: {} length: {} }} ", hex::encode(self.digest), self.funding, self.length)
     }
 }
 
 impl ContentKey {
-    pub fn new (hash: &[u8], length: u32, weight: u32) -> ContentKey {
+    pub fn new (hash: &[u8], length: u32, funding: u64) -> ContentKey {
         assert_eq!(hash.len(), DIGEST_LEN);
         let mut digest = [0u8; DIGEST_LEN];
         digest.copy_from_slice(&hash[..]);
-        ContentKey{digest, length, weight}
+        ContentKey{digest, length, funding }
     }
 }
 
@@ -92,19 +97,8 @@ pub struct Content {
 }
 
 impl Content {
-
     pub fn length(&self) -> Result<u32, Box<dyn error::Error>> {
         Ok(serde_cbor::to_vec(self)?.len() as u32)
     }
-
-    /// return ratio of funding and size
-    pub fn weight (&self, ctx: &Secp256k1<All>) -> Result<u32, Box<dyn error::Error>> {
-        let f_script = funding_script(&self.funder, &self.ad.digest(), self.term, ctx);
-
-        Ok((self.funding.get_transaction().output.iter().filter_map(|o| if o.script_pubkey == f_script { Some(o.value)} else {None}).sum::<u64>()
-            / self.length()? as u64) as u32)
-    }
 }
-
-
 

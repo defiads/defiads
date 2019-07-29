@@ -1,3 +1,19 @@
+//
+// Copyright 2019 Tamas Blummer
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+
 //! Invertible Bloom Lookup Table
 //! see: https://dash.harvard.edu/bitstream/handle/1/14398536/GENTILI-SENIORTHESIS-2015.pdf
 
@@ -17,10 +33,12 @@ const K_MAX: usize = 6;
 
 const ID_LEN:usize = 32;
 
+/// trait any key of an IBLT has to implement
 pub trait IBLTKey : BitXorAssign + Copy + Clone + Eq + PartialEq + Default + std::hash::Hash {
     fn hash_to_u64_with_keys (&self, k0: u64, k1: u64) -> u64;
 }
 
+/// an key set
 pub trait IBLTKeySet<K : IBLTKey> {
     fn insert (&mut self, id: K) -> bool;
     fn remove(&mut self, id: &K) -> bool;
@@ -36,6 +54,7 @@ impl<K : IBLTKey> IBLTKeySet<K> for HashSet<K> {
     }
 }
 
+/// an invertible bloom lookup table
 #[derive(Clone, Serialize, Deserialize)]
 pub struct IBLT<K : IBLTKey> {
     buckets: Vec<Bucket<K>>,
@@ -114,7 +133,7 @@ impl<K : IBLTKey> IBLT<K> {
         }
     }
 
-    pub fn sync<S: IBLTKeySet<K>>(&self, other: &IBLT<K>, set: &mut S) -> Result<(), Box<dyn Error>> {
+    fn sync<S: IBLTKeySet<K>>(&self, other: &IBLT<K>, set: &mut S) -> Result<(), Box<dyn Error>> {
         let mut copy = self.clone();
         copy.substract(other);
         for e in copy.iter() {
@@ -127,6 +146,7 @@ impl<K : IBLTKey> IBLT<K> {
     }
 }
 
+/// compute a vector suitable to estimate set difference size
 pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut dyn Iterator<Item=&impl IBLTKey>) -> Vec<u64> {
     let ksequence = generate_ksequence(n, k0, k1);
     let mut min_hashes = vec![0xffffffffffffffff; n];
@@ -316,7 +336,7 @@ mod test {
 
     #[test]
     pub fn test_few_inserts () {
-        let mut a = IBLT::new(30, 3,0, 0);
+        let mut a = IBLT::new(35, 3,0, 0);
 
         let mut set = HashSet::new();
         for i in 0..20 {

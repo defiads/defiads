@@ -1,15 +1,31 @@
-//! An advertizement
+//
+// Copyright 2019 Tamas Blummer
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// ! An ad, the payload of distributed content
 
 use std::error::Error;
 
 use crate::text::Text;
 use crate::bitcoin_hashes::{sha256, Hash};
 
-/// An ad
+/// An ad, the payload of distributed content
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub struct Ad {
-    cat : String,
-    content: Vec<KeyValue>
+    pub cat : String,
+    pub abs: String,
+    pub content: Vec<KeyValue>
 }
 
 impl Ad {
@@ -18,11 +34,12 @@ impl Ad {
         serde_cbor::to_vec(&self).unwrap()
     }
 
-    /// deserealize an ad from a byte stream
+    /// deserialize an ad from a byte stream
     pub fn deserialize(data: &[u8]) -> Result<Ad, Box<dyn Error>> {
         Ok(serde_cbor::from_slice::<Ad>(data)?)
     }
 
+    /// the digest funding transactions commit to
     pub fn digest(&self) -> sha256::Hash {
         sha256::Hash::hash(self.serialize().as_slice())
     }
@@ -31,16 +48,20 @@ impl Ad {
 /// Key Value Pair
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub struct KeyValue {
-    key: String,
-    value: Value
+    /// key
+    pub key: String,
+    /// value
+    pub value: Value
 }
 
+/// a number in the ad
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Number {
     value: f32
 }
 
 impl Number {
+    /// create a new number
     pub fn new(value: f32) -> Number {
         Number{value}
     }
@@ -74,7 +95,7 @@ mod test {
 
     #[test]
     fn test_ad_serialization () {
-        let ad = Ad { cat: "whatever".to_string(),
+        let ad = Ad { cat: "whatever".to_string(), abs: "this".to_string(),
             content:
                 vec![
                     KeyValue{key: "description".to_string(),
