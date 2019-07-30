@@ -18,6 +18,7 @@
 use std::convert;
 use std::error::Error;
 use std::fmt;
+use std::io;
 use crate::bitcoin_wallet::error::WalletError;
 
 /// An error class to offer a unified error interface upstream
@@ -26,6 +27,8 @@ pub enum BiadNetError {
     Unsupported(&'static str),
     /// wallet related error
     Wallet(WalletError),
+    /// IO error
+    IO(io::Error)
 }
 
 impl Error for BiadNetError {
@@ -33,13 +36,15 @@ impl Error for BiadNetError {
         match *self {
             BiadNetError::Unsupported(ref s) => s,
             BiadNetError::Wallet(ref err) => err.description(),
+            BiadNetError::IO(ref err) => err.description()
         }
     }
 
     fn cause(&self) -> Option<&dyn Error> {
         match *self {
             BiadNetError::Unsupported(_) => None,
-            BiadNetError::Wallet(ref err) => Some(err)
+            BiadNetError::Wallet(ref err) => Some(err),
+            BiadNetError::IO(ref err) => Some(err)
         }
     }
 }
@@ -50,7 +55,8 @@ impl fmt::Display for BiadNetError {
             // Both underlying errors already impl `Display`, so we defer to
             // their implementations.
             BiadNetError::Unsupported(ref s) => write!(f, "Unsupported: {}", s),
-            BiadNetError::Wallet(ref s) => write!(f, "Wallet: {}", s),
+            BiadNetError::Wallet(ref s) => write!(f, "{}", s),
+            BiadNetError::IO(ref s) => write!(f, "{}", s),
         }
     }
 }
@@ -64,5 +70,11 @@ impl fmt::Debug for BiadNetError {
 impl convert::From<WalletError> for BiadNetError {
     fn from(err: WalletError) -> BiadNetError {
         BiadNetError::Wallet(err)
+    }
+}
+
+impl convert::From<io::Error> for BiadNetError {
+    fn from(err: io::Error) -> BiadNetError {
+        BiadNetError::IO(err)
     }
 }
