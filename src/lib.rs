@@ -20,7 +20,6 @@
 #![deny(non_camel_case_types)]
 #![deny(non_snake_case)]
 #![deny(unused_mut)]
-#![deny(missing_docs)]
 #![deny(unused_must_use)]
 #![forbid(unsafe_code)]
 
@@ -38,6 +37,9 @@ extern crate bitcoin_wallet;
 extern crate siphasher;
 extern crate secp256k1;
 extern crate rand;
+extern crate murmel;
+extern crate log;
+extern crate simple_logger;
 
 pub mod error;
 mod text;
