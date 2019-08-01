@@ -14,7 +14,10 @@
 // limitations under the License.
 //
 
-use bitcoin::network::constants::Network;
+use bitcoin::{
+    Block, BlockHeader,
+    network::constants::Network
+};
 use murmel::{
     dispatcher::Dispatcher,
     p2p::P2P
@@ -28,10 +31,19 @@ use murmel::p2p::P2PControl;
 use std::net::SocketAddr;
 use std::net::SocketAddrV4;
 use std::net::Ipv4Addr;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 use future::Future;
 use futures::{Never, future};
 use futures::Async;
 use futures::executor::{Executor, ThreadPoolBuilder};
+use murmel::chaindb::ChainDB;
+use murmel::headerdownload::HeaderDownload;
+use murmel::timeout::Timeout;
+use murmel::downstream::Downstream;
+
+use biadne::store::ContentStore;
+use std::sync::RwLock;
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
 
@@ -42,7 +54,10 @@ pub fn main () {
 
     let (sender, receiver) = mpsc::sync_channel(100);
 
-    let dispatcher = Dispatcher::new(receiver);
+    let mut dispatcher = Dispatcher::new(receiver);
+
+    let chaindb = Arc::new(RwLock::new(
+        ChainDB::new(&Path::new("headers"), Network::Bitcoin, 0).expect("can not open db")));
 
     let (p2p, p2p_control) = P2P::new(
         "biadnet 0.1.0".to_string(),
@@ -52,6 +67,14 @@ pub fn main () {
         false,
         PeerMessageSender::new(sender),
         10);
+
+    let timeout = Arc::new(Mutex::new(Timeout::new(p2p_control.clone())));
+
+    let downstream = Arc::new(Mutex::new(Driver{store: ContentStore::new()}));
+
+    let header_downloader = HeaderDownload::new(chaindb.clone(), p2p_control.clone(), timeout, downstream);
+
+    dispatcher.add_listener(header_downloader);
 
     p2p.add_peer(PeerSource::Outgoing(mynode));
 
@@ -66,4 +89,20 @@ pub fn main () {
 
     // note that this call does not return
     thread_pool.run::<Box<dyn Future<Item=(),Error=Never>>>(Box::new(future::poll_fn(|c| Ok(Async::Pending)))).unwrap();
+}
+
+pub struct Driver {
+    store: ContentStore
+}
+
+impl Downstream for Driver {
+    fn block_connected(&mut self, block: &Block, height: u32) {}
+
+    fn header_connected(&mut self, block: &BlockHeader, height: u32) {
+        self.store.add_header(block).expect("can not add header");
+    }
+
+    fn block_disconnected(&mut self, _: &BlockHeader) {
+        self.store.unwind_tip().expect("can not unwind tip");
+    }
 }

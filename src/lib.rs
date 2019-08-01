@@ -48,4 +48,4 @@ mod iblt;
 mod messages;
 mod content;
 mod funding;
-mod store;
+pub mod store;
