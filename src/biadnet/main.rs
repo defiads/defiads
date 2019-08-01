@@ -48,7 +48,7 @@ use std::sync::RwLock;
 const MAX_PROTOCOL_VERSION: u32 = 70001;
 
 pub fn main () {
-    simple_logger::init_with_level(Level::Trace).unwrap();
+    simple_logger::init_with_level(Level::Debug).unwrap();
 
     let mynode = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(87,230,22,85), 8333));
 
@@ -58,6 +58,7 @@ pub fn main () {
 
     let chaindb = Arc::new(RwLock::new(
         ChainDB::new(&Path::new("headers"), Network::Bitcoin, 0).expect("can not open db")));
+    chaindb.write().unwrap().init(false).expect("can not initialize db");
 
     let (p2p, p2p_control) = P2P::new(
         "biadnet 0.1.0".to_string(),
