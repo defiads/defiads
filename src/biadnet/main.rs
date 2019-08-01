@@ -14,6 +14,8 @@
 // limitations under the License.
 //
 
+#[macro_use]extern crate log;
+
 use bitcoin::{
     Block, BlockHeader,
     network::constants::Network
@@ -32,25 +34,29 @@ use std::net::SocketAddr;
 use std::net::SocketAddrV4;
 use std::net::Ipv4Addr;
 use std::path::Path;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use future::Future;
 use futures::{Never, future};
-use futures::Async;
+use futures::{Poll,Async};
+use futures::task;
 use futures::executor::{Executor, ThreadPoolBuilder};
 use murmel::chaindb::ChainDB;
 use murmel::headerdownload::HeaderDownload;
 use murmel::timeout::Timeout;
 use murmel::downstream::Downstream;
+use murmel::dns::dns_seed;
+use rand::{thread_rng, RngCore};
 
 use biadne::store::ContentStore;
 use std::sync::RwLock;
+use biadne::error::BiadNetError;
+use murmel::error::MurmelError;
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
 
 pub fn main () {
     simple_logger::init_with_level(Level::Debug).unwrap();
-
-    let mynode = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(87,230,22,85), 8333));
 
     let (sender, receiver) = mpsc::sync_channel(100);
 
@@ -77,8 +83,6 @@ pub fn main () {
 
     dispatcher.add_listener(header_downloader);
 
-    p2p.add_peer(PeerSource::Outgoing(mynode));
-
     let mut thread_pool = ThreadPoolBuilder::new().create().expect("can not start thread pool");
     let p2p2 = p2p.clone();
     let p2p_task = Box::new(future::poll_fn(move |ctx| {
@@ -89,7 +93,7 @@ pub fn main () {
     thread_pool.spawn(p2p_task).unwrap();
 
     // note that this call does not return
-    thread_pool.run::<Box<dyn Future<Item=(),Error=Never>>>(Box::new(future::poll_fn(|c| Ok(Async::Pending)))).unwrap();
+    thread_pool.run(keep_connected(p2p.clone(), vec!(), 3)).unwrap();
 }
 
 pub struct Driver {
@@ -106,4 +110,83 @@ impl Downstream for Driver {
     fn block_disconnected(&mut self, _: &BlockHeader) {
         self.store.unwind_tip().expect("can not unwind tip");
     }
+}
+
+fn keep_connected(p2p: Arc<P2P>, peers: Vec<SocketAddr>, min_connections: usize) -> Box<Future<Item=(), Error=Never> + Send> {
+
+    // add initial peers if any
+    let mut added = Vec::new();
+    for addr in &peers {
+        added.push(p2p.add_peer(PeerSource::Outgoing(addr.clone())));
+    }
+
+    struct KeepConnected {
+        min_connections: usize,
+        connections: Vec<Box<Future<Item=SocketAddr, Error=MurmelError> + Send>>,
+        p2p: Arc<P2P>,
+        dns: Vec<SocketAddr>,
+        earlier: HashSet<SocketAddr>
+    }
+
+    // this task runs until it runs out of peers
+    impl Future for KeepConnected {
+        type Item = ();
+        type Error = Never;
+
+        fn poll(&mut self, cx: &mut task::Context) -> Poll<Self::Item, Self::Error> {
+            // return from this loop with 'pending' if enough peers are connected
+            loop {
+                // add further peers from db if needed
+                self.peers_from_db();
+                self.dns_lookup();
+
+                if self.connections.len() == 0 {
+                    // run out of peers. this is fatal
+                    error!("no more peers to connect");
+                    return Ok(Async::Ready(()));
+                }
+                // find a finished peer
+                let finished = self.connections.iter_mut().enumerate().filter_map(|(i, f)| {
+                    // if any of them finished
+                    // note that poll is reusing context of this poll, so wakeups come here
+                    match f.poll(cx) {
+                        Ok(Async::Pending) => None,
+                        Ok(Async::Ready(e)) => {
+                            trace!("woke up to lost peer");
+                            Some((i, Ok(e)))
+                        }
+                        Err(e) => {
+                            trace!("woke up to peer error");
+                            Some((i, Err(e)))
+                        }
+                    }
+                }).next();
+                match finished {
+                    Some((i, _)) => self.connections.remove(i),
+                    None => return Ok(Async::Pending)
+                };
+            }
+        }
+    }
+
+    impl KeepConnected {
+        fn peers_from_db(&mut self) {
+            // TODO
+        }
+
+        fn dns_lookup(&mut self) {
+            while self.connections.len() < self.min_connections {
+                if self.dns.len() == 0 {
+                    self.dns = dns_seed(self.p2p.network);
+                }
+                if self.dns.len() > 0 {
+                    let mut rng = thread_rng();
+                    let addr = self.dns[(rng.next_u64() as usize) % self.dns.len()];
+                    self.connections.push(self.p2p.add_peer(PeerSource::Outgoing(addr)));
+                }
+            }
+        }
+    }
+
+    Box::new(KeepConnected { min_connections, connections: added, p2p, dns: Vec::new(), earlier: HashSet::new() })
 }
