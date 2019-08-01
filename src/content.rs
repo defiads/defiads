@@ -39,16 +39,13 @@ const DIGEST_LEN: usize = secp256k1::constants::MESSAGE_SIZE;
 pub struct ContentKey {
     /// content digest
     pub digest: [u8; DIGEST_LEN],
-    /// content length
-    pub length: u32,
-    /// content funding amount
-    pub funding: u64
+    /// content length/funding
+    pub weight: u32
 }
 
 impl BitXorAssign for ContentKey {
     fn bitxor_assign(&mut self, rhs: ContentKey) {
-        self.length ^= rhs.length;
-        self.funding ^= rhs.funding;
+        self.weight ^= rhs.weight;
         self.digest.iter_mut().zip(rhs.digest.iter()).for_each(|(a, b)| *a ^= b);
     }
 }
@@ -57,12 +54,9 @@ impl IBLTKey for ContentKey {
     fn hash_to_u64_with_keys(&self, k0: u64, k1: u64) -> u64 {
         let mut hasher = siphasher::sip::SipHasher::new_with_keys(k0, k1);
         let mut buf = [0u8; 4];
-        LittleEndian::write_u32(&mut buf, self.length);
-        hasher.write(&buf);
-        let mut buf = [0u8; 8];
-        LittleEndian::write_u64(&mut buf, self.funding);
-        hasher.write(&buf);
+        LittleEndian::write_u32(&mut buf, self.weight);
         hasher.write(&self.digest[..]);
+        hasher.write(&buf);
         hasher.finish()
     }
 }
@@ -70,16 +64,16 @@ impl IBLTKey for ContentKey {
 #[cfg(test)]
 impl fmt::Debug for ContentKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "ContentKey{{ digest: {} funding: {} length: {} }} ", hex::encode(self.digest), self.funding, self.length)
+        write!(f, "ContentKey{{digest: {} weight: {}}} ", hex::encode(self.digest), self.weight)
     }
 }
 
 impl ContentKey {
-    pub fn new (hash: &[u8], length: u32, funding: u64) -> ContentKey {
+    pub fn new (hash: &[u8], weight: u32) -> ContentKey {
         assert_eq!(hash.len(), DIGEST_LEN);
         let mut digest = [0u8; DIGEST_LEN];
         digest.copy_from_slice(&hash[..]);
-        ContentKey{digest, length, funding }
+        ContentKey{digest, weight }
     }
 }
 
