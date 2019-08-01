@@ -17,7 +17,7 @@
 //! store
 
 use bitcoin::{OutPoint, BlockHeader, BitcoinHash};
-use bitcoin_hashes::{sha256d, sha256};
+use bitcoin_hashes::{sha256d, sha256, hex::ToHex};
 use bitcoin_wallet::{proved::ProvedTransaction};
 use secp256k1::{Secp256k1, All};
 use std::collections::HashMap;
@@ -71,6 +71,7 @@ impl ContentStore {
     /// the caller should do SPV check and evtl. unwind
     /// before adding this header after a reorg.
     pub fn add_header(&mut self, header: &BlockHeader) -> Result<(), BiadNetError> {
+        info!("new chain tip {}", header.bitcoin_hash());
         if self.headers.len() > 0 {
             // only append to tip
             if self.get_tip().unwrap().bitcoin_hash() == header.prev_blockhash {
@@ -89,6 +90,7 @@ impl ContentStore {
 
     /// unwind the tip
     pub fn unwind_tip(&mut self) -> Result<(), BiadNetError> {
+        info!("unwind tip");
         let len = self.headers.len();
         if len > 0 {
             // remove tip
@@ -118,6 +120,7 @@ impl ContentStore {
             self.trans_store.remove(pos);
         }
         // TODO persistent store
+        info!("remove content {}", digest.to_hex());
     }
 
     /// add content
@@ -127,8 +130,10 @@ impl ContentStore {
             if h.merkle_root == content.funding.merkle_root() {
                 let t = content.funding.get_transaction();
                 if t.version as u32 >= 2 {
-                    let commitment = funding_script(&content.funder, &content.ad.digest(), content.term, &self.ctx);
+                    let digest = content.ad.digest();
+                    let commitment = funding_script(&content.funder, &digest, content.term, &self.ctx);
                     if let Some((vout, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
+                        info!("add content {}", &digest);
                         return Ok(self.add_to_trans_store(content, o.value, OutPoint { txid: t.txid(), vout: vout as u32 })?)
                         // TODO persistent store
                     }

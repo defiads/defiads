@@ -27,10 +27,8 @@
 extern crate snap;
 extern crate byteorder;
 extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-#[cfg(test)]
-extern crate hex;
+#[macro_use]extern crate serde_derive;
+#[cfg(test)]extern crate hex;
 extern crate bitcoin_hashes;
 extern crate bitcoin;
 extern crate bitcoin_wallet;
@@ -38,7 +36,7 @@ extern crate siphasher;
 extern crate secp256k1;
 extern crate rand;
 extern crate murmel;
-extern crate log;
+#[macro_use]extern crate log;
 extern crate simple_logger;
 
 pub mod error;
