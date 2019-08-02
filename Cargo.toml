@@ -18,7 +18,7 @@ bitcoin_hashes={version="0.3", features=["serde"]}
 bitcoin={version="0.18", features=["serde", "bitcoinconsensus"]}
 secp256k1={version="0.12", features=["rand", "serde"]}
 bitcoin-wallet={git="https://github.com/tamasblummer/rust-wallet.git", branch = "master"}
-murmel={git="https://github.com/tamasblummer/murmel.git", branch = "master"}
+murmel={git="https://github.com/tamasblummer/murmel.git", branch = "parameterize_p2p"}
 siphasher="0.3"
 rand = "0.7"
 log="0.4"

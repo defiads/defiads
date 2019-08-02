@@ -49,9 +49,12 @@ use murmel::dns::dns_seed;
 use rand::{thread_rng, RngCore};
 
 use biadne::store::ContentStore;
-use std::sync::RwLock;
+use std::sync::{atomic::AtomicUsize, RwLock};
 use biadne::error::BiadNetError;
 use murmel::error::MurmelError;
+use murmel::p2p::BitcoinP2PConfig;
+use bitcoin::network::message::NetworkMessage;
+use bitcoin::network::message::RawNetworkMessage;
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
 
@@ -66,12 +69,27 @@ pub fn main () {
         ChainDB::new(&Path::new("headers"), Network::Bitcoin, 0).expect("can not open db")));
     chaindb.write().unwrap().init(false).expect("can not initialize db");
 
+    let height =
+    if let Some(tip) = chaindb.read().unwrap().header_tip() {
+        AtomicUsize::new(tip.stored.height as usize)
+    }
+    else {
+        AtomicUsize::new(0)
+    };
+
+    let network = Network::Bitcoin;
+
+    let bitcoin_p2pconfig = BitcoinP2PConfig {
+        nonce: thread_rng().next_u64(),
+        network,
+        max_protocol_version: MAX_PROTOCOL_VERSION,
+        user_agent: "biadnet 0.1.0".to_string(),
+        server: false,
+        height
+    };
+
     let (p2p, p2p_control) = P2P::new(
-        "biadnet 0.1.0".to_string(),
-        Network::Bitcoin,
-        0,
-        MAX_PROTOCOL_VERSION,
-        false,
+        bitcoin_p2pconfig,
         PeerMessageSender::new(sender),
         10);
 
@@ -93,7 +111,7 @@ pub fn main () {
     thread_pool.spawn(p2p_task).unwrap();
 
     // note that this call does not return
-    thread_pool.run(keep_connected(p2p.clone(), vec!(), 3)).unwrap();
+    thread_pool.run(keep_connected(network,p2p.clone(), vec!(), 3)).unwrap();
 }
 
 pub struct Driver {
@@ -112,7 +130,7 @@ impl Downstream for Driver {
     }
 }
 
-fn keep_connected(p2p: Arc<P2P>, peers: Vec<SocketAddr>, min_connections: usize) -> Box<Future<Item=(), Error=Never> + Send> {
+fn keep_connected(network: Network, p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize) -> Box<Future<Item=(), Error=Never> + Send> {
 
     // add initial peers if any
     let mut added = Vec::new();
@@ -121,9 +139,10 @@ fn keep_connected(p2p: Arc<P2P>, peers: Vec<SocketAddr>, min_connections: usize)
     }
 
     struct KeepConnected {
+        network: Network,
         min_connections: usize,
         connections: Vec<Box<Future<Item=SocketAddr, Error=MurmelError> + Send>>,
-        p2p: Arc<P2P>,
+        p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>,
         dns: Vec<SocketAddr>,
         earlier: HashSet<SocketAddr>
     }
@@ -177,7 +196,7 @@ fn keep_connected(p2p: Arc<P2P>, peers: Vec<SocketAddr>, min_connections: usize)
         fn dns_lookup(&mut self) {
             while self.connections.len() < self.min_connections {
                 if self.dns.len() == 0 {
-                    self.dns = dns_seed(self.p2p.network);
+                    self.dns = dns_seed(self.network);
                 }
                 if self.dns.len() > 0 {
                     let mut rng = thread_rng();
@@ -188,5 +207,5 @@ fn keep_connected(p2p: Arc<P2P>, peers: Vec<SocketAddr>, min_connections: usize)
         }
     }
 
-    Box::new(KeepConnected { min_connections, connections: added, p2p, dns: Vec::new(), earlier: HashSet::new() })
+    Box::new(KeepConnected { network, min_connections, connections: added, p2p, dns: Vec::new(), earlier: HashSet::new() })
 }
