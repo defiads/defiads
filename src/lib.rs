@@ -48,3 +48,4 @@ mod content;
 mod funding;
 mod store;
 pub mod p2p_bitcoin;
+pub mod p2p_biadnet;

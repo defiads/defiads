@@ -15,10 +15,12 @@
 //
 
 use std::{
+    io,
     collections::HashSet,
     net::{IpAddr, SocketAddr, SocketAddrV4},
     path::Path,
-    sync::{Arc, Mutex, RwLock, mpsc, atomic::AtomicUsize}
+    sync::{Arc, Mutex, RwLock, mpsc, atomic::AtomicUsize},
+    time::{UNIX_EPOCH, SystemTime}
 };
 use bitcoin::{
     Block, BlockHeader,
@@ -48,8 +50,7 @@ use murmel::{
     headerdownload::HeaderDownload,
     p2p::{
         PeerMessageSender, PeerSource,
-        BitcoinP2PConfig,
-        P2PControl
+        P2PConfig, P2PControl, Buffer
     },
     timeout::Timeout
 };
@@ -58,42 +59,142 @@ use simple_logger::init_with_level;
 
 use crate::error::BiadNetError;
 use crate::store::ContentStore;
+use crate::messages::{Message, Envelope, VersionMessage, SockAddress};
+use murmel::p2p::Version;
+use serde_cbor::{Deserializer, StreamDeserializer};
 
-const MAX_PROTOCOL_VERSION: u32 = 70001;
+const MAGIC: u32 = 0xB1AD;
+const MAX_PROTOCOL_VERSION: u32 = 1;
 
-pub struct BitcoinAdaptor {}
+#[derive(Clone)]
+struct BiadnetP2PConfig {
+    // This node's identifier on the network (random)
+    pub nonce: u64,
+    // This node's human readable type identification
+    pub user_agent: String,
+    // this node's maximum protocol version
+    pub max_protocol_version: u32,
+    // serving others
+    pub server: bool,
+}
 
-impl BitcoinAdaptor {
-    pub fn new () -> BitcoinAdaptor {
-        BitcoinAdaptor{}
+impl P2PConfig<Message, Envelope> for BiadnetP2PConfig {
+    // compile this node's version message for outgoing connections
+    fn version (&self, remote: &SocketAddr, max_protocol_version: u32) -> Message {
+        Message::Version(
+            VersionMessage {
+                version: std::cmp::min(MAX_PROTOCOL_VERSION, max_protocol_version),
+                nonce: thread_rng().next_u64(),
+                timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                start_height: 0, // TODO
+                user_agent: "biadnet 0.1.0".to_string(),
+                receiver: SockAddress::default(), // TODO
+                sender: SockAddress::default(), // TODO
+            }
+        )
+    }
+
+    fn nonce(&self) -> u64 {
+        self.nonce
+    }
+
+    fn magic(&self) -> u32 {
+        MAGIC
+    }
+
+    fn user_agent(&self) -> &str {
+        self.user_agent.as_str()
+    }
+
+    fn get_height(&self) -> u32 {
+        0
+    }
+
+    fn set_height(&self, height: u32) {
+    }
+
+    fn max_protocol_version(&self) -> u32 {
+        self.max_protocol_version
+    }
+
+    fn verack(&self) -> Message {
+        Message::Verack
+    }
+
+    fn wrap(&self, m: Message) -> Envelope {
+        Envelope{magic: MAGIC, payload: m}
+    }
+
+    fn unwrap(&self, e: Envelope) -> Message {
+        e.payload
+    }
+
+    // encode a message in Bitcoin's wire format extending the given buffer
+    fn encode(&self, item: &Envelope, dst: &mut Buffer) -> Result<(), io::Error> {
+        match serde_cbor::to_writer(dst, item) {
+            Err(e) => Err(io::Error::from(io::ErrorKind::InvalidInput)),
+            Ok(_)=> Ok(())
+        }
+    }
+
+    // decode a message from the buffer if possible
+    fn decode(&self, src: &mut Buffer) -> Result<Option<Envelope>, io::Error> {
+        // attempt to decode
+        let decode;
+        {
+            let passthrough = PassThroughBufferReader{buffer: src};
+            decode = Deserializer::from_reader(passthrough).into_iter::<Envelope>().next();
+        }
+        match decode {
+            None => {
+                src.rollback();
+                return Ok(None);
+            }
+            Some(Ok(m)) => {
+                // success: free the read data in buffer and return the message
+                src.commit();
+                Ok(Some(m))
+            },
+            Some(Err(e)) => {
+                if e.classify() == serde_cbor::error::Category::Eof {
+                    // need more data, rollback and retry after additional read
+                    src.rollback();
+                    return Ok(None)
+                } else {
+                    return  Err(io::Error::from(io::ErrorKind::InvalidInput));
+                }
+            },
+        }
+    }
+}
+
+struct PassThroughBufferReader<'a> {
+    buffer: &'a mut Buffer
+}
+
+impl<'a> io::Read for PassThroughBufferReader<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
+        self.buffer.read(buf)
+    }
+}
+
+pub struct BiadNetAdaptor {}
+
+impl BiadNetAdaptor {
+    pub fn new () -> BiadNetAdaptor {
+        BiadNetAdaptor {}
     }
 
     pub fn run(&mut self) {
         let (sender, receiver) = mpsc::sync_channel(100);
 
-        let mut dispatcher = Dispatcher::new(receiver);
+        let dispatcher = Dispatcher::new(receiver);
 
-        let chaindb = Arc::new(RwLock::new(
-            ChainDB::new(&Path::new("headers"), Network::Bitcoin, 0).expect("can not open db")));
-        chaindb.write().unwrap().init(false).expect("can not initialize db");
-
-        let height =
-            if let Some(tip) = chaindb.read().unwrap().header_tip() {
-                AtomicUsize::new(tip.stored.height as usize)
-            }
-            else {
-                AtomicUsize::new(0)
-            };
-
-        let network = Network::Bitcoin;
-
-        let bitcoin_p2pconfig = BitcoinP2PConfig {
+        let bitcoin_p2pconfig = BiadnetP2PConfig {
             nonce: thread_rng().next_u64(),
-            network,
             max_protocol_version: MAX_PROTOCOL_VERSION,
             user_agent: "biadnet 0.1.0".to_string(),
-            server: false,
-            height
+            server: false
         };
 
         let (p2p, p2p_control) = P2P::new(
@@ -102,13 +203,6 @@ impl BitcoinAdaptor {
             10);
 
         let timeout = Arc::new(Mutex::new(Timeout::new(p2p_control.clone())));
-
-        let downstream = Arc::new(Mutex::new(BitcoinDriver{store:
-        ContentStore::new(Arc::new(ChainDBTrunk{chaindb: chaindb.clone()}))}));
-
-        let header_downloader = HeaderDownload::new(chaindb.clone(), p2p_control.clone(), timeout, downstream);
-
-        dispatcher.add_listener(header_downloader);
 
         let mut thread_pool = ThreadPoolBuilder::new().create().expect("can not start thread pool");
         let p2p2 = p2p.clone();
@@ -120,10 +214,10 @@ impl BitcoinAdaptor {
         thread_pool.spawn(p2p_task).unwrap();
 
         // note that this call does not return
-        thread_pool.run(Self::keep_connected(network,p2p.clone(), vec!(), 3)).unwrap();
+        thread_pool.run(Self::keep_connected(p2p.clone(), vec!(), 3)).unwrap();
     }
 
-    fn keep_connected(network: Network, p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize) -> Box<dyn Future<Item=(), Error=Never> + Send> {
+    fn keep_connected(p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize) -> Box<dyn Future<Item=(), Error=Never> + Send> {
 
         // add initial peers if any
         let mut added = Vec::new();
@@ -132,10 +226,9 @@ impl BitcoinAdaptor {
         }
 
         struct KeepConnected {
-            network: Network,
             min_connections: usize,
             connections: Vec<Box<dyn Future<Item=SocketAddr, Error=MurmelError> + Send>>,
-            p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>,
+            p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>,
             dns: Vec<SocketAddr>,
             earlier: HashSet<SocketAddr>
         }
@@ -189,7 +282,7 @@ impl BitcoinAdaptor {
             fn dns_lookup(&mut self) {
                 while self.connections.len() < self.min_connections {
                     if self.dns.len() == 0 {
-                        self.dns = dns_seed(self.network);
+                        // TODO self.dns = dns_seed(self.network);
                     }
                     if self.dns.len() > 0 {
                         let mut rng = thread_rng();
@@ -200,24 +293,7 @@ impl BitcoinAdaptor {
             }
         }
 
-        Box::new(KeepConnected { network, min_connections, connections: added, p2p, dns: Vec::new(), earlier: HashSet::new() })
-    }
-}
-
-
-struct BitcoinDriver {
-    store: ContentStore
-}
-
-impl Downstream for BitcoinDriver {
-    fn block_connected(&mut self, block: &Block, height: u32) {}
-
-    fn header_connected(&mut self, block: &BlockHeader, height: u32) {
-        self.store.add_header(block).expect("can not add header");
-    }
-
-    fn block_disconnected(&mut self, header: &BlockHeader) {
-        self.store.unwind_tip(header).expect("can not unwind tip");
+        Box::new(KeepConnected { min_connections, connections: added, p2p, dns: Vec::new(), earlier: HashSet::new() })
     }
 }
 

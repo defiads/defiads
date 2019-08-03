@@ -20,10 +20,12 @@ use simple_logger;
 use log::Level;
 
 use biadne::p2p_bitcoin::BitcoinAdaptor;
+use biadne::p2p_biadnet::BiadNetAdaptor;
 
 pub fn main () {
     simple_logger::init_with_level(Level::Debug).unwrap();
     info!("biadnet starting.");
-    BitcoinAdaptor::new().init();
+    BitcoinAdaptor::new().run();
+    BiadNetAdaptor::new().run();
 }
 
