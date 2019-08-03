@@ -39,11 +39,12 @@ extern crate murmel;
 #[macro_use]extern crate log;
 extern crate simple_logger;
 
-pub mod error;
+mod error;
 mod text;
 mod ad;
 mod iblt;
 mod messages;
 mod content;
 mod funding;
-pub mod store;
+mod store;
+pub mod p2p_bitcoin;
