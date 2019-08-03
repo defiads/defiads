@@ -93,7 +93,7 @@ pub struct Content {
 impl Content {
     /// length includes also the length of proof
     pub fn length(&self) -> Result<u32, Box<dyn error::Error>> {
-        Ok(serde_cbor::to_vec(self)?.len() as u32)
+        Ok(serde_cbor::ser::to_vec_packed(self)?.len() as u32)
     }
 }
 

@@ -31,7 +31,7 @@ pub struct Ad {
 impl Ad {
     /// serialize an ad to a byte stream
     pub fn serialize(&self) -> Vec<u8> {
-        serde_cbor::to_vec(&self).unwrap()
+        serde_cbor::ser::to_vec_packed(&self).unwrap()
     }
 
     /// deserialize an ad from a byte stream
