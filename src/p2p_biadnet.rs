@@ -288,6 +288,9 @@ impl BiadNetAdaptor {
                         let addr = self.dns[(rng.next_u64() as usize) % self.dns.len()];
                         self.connections.push(self.p2p.add_peer(PeerSource::Outgoing(addr)));
                     }
+                    else {
+                        break;
+                    }
                 }
             }
         }
