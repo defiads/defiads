@@ -36,7 +36,7 @@ use bitcoin_hashes::sha256d;
 use bitcoin_wallet::trunk::Trunk;
 use future::Future;
 use futures::{future, Never, Async, Poll, task,
-              executor::{Executor, ThreadPoolBuilder}
+              executor::{Executor, ThreadPoolBuilder, ThreadPool}
 };
 
 use log::Level;
@@ -60,6 +60,8 @@ use simple_logger::init_with_level;
 use crate::error::BiadNetError;
 use crate::store::ContentStore;
 use crate::messages::{Message, Envelope, VersionMessage, SockAddress};
+use crate::updater::Updater;
+
 use murmel::p2p::Version;
 use serde_cbor::{Deserializer, StreamDeserializer};
 
@@ -178,19 +180,14 @@ impl<'a> io::Read for PassThroughBufferReader<'a> {
     }
 }
 
-pub struct BiadNetAdaptor {}
+pub struct BiadNetAdaptor{}
 
 impl BiadNetAdaptor {
-    pub fn new () -> BiadNetAdaptor {
-        BiadNetAdaptor {}
-    }
-
-    pub fn run(&mut self) {
+    pub fn start(thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
+        let mut dispatcher = Dispatcher::new(receiver);
 
-        let dispatcher = Dispatcher::new(receiver);
-
-        let bitcoin_p2pconfig = BiadnetP2PConfig {
+        let p2pconfig = BiadnetP2PConfig {
             nonce: thread_rng().next_u64(),
             max_protocol_version: MAX_PROTOCOL_VERSION,
             user_agent: "biadnet 0.1.0".to_string(),
@@ -198,13 +195,15 @@ impl BiadNetAdaptor {
         };
 
         let (p2p, p2p_control) = P2P::new(
-            bitcoin_p2pconfig,
+            p2pconfig,
             PeerMessageSender::new(sender),
             10);
 
         let timeout = Arc::new(Mutex::new(Timeout::new(p2p_control.clone())));
 
-        let mut thread_pool = ThreadPoolBuilder::new().create().expect("can not start thread pool");
+        let updater = Updater::new(p2p_control, timeout);
+        dispatcher.add_listener(updater);
+
         let p2p2 = p2p.clone();
         let p2p_task = Box::new(future::poll_fn(move |ctx| {
             p2p2.run(0, ctx).unwrap();
@@ -213,8 +212,8 @@ impl BiadNetAdaptor {
         // start the task that runs all network communication
         thread_pool.spawn(p2p_task).unwrap();
 
-        // note that this call does not return
-        thread_pool.run(Self::keep_connected(p2p.clone(), vec!(), 3)).unwrap();
+        info!("BiadNet p2p engine started");
+        thread_pool.spawn(Self::keep_connected(p2p.clone(), vec!(), 3)).unwrap();
     }
 
     fn keep_connected(p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize) -> Box<dyn Future<Item=(), Error=Never> + Send> {

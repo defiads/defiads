@@ -58,17 +58,14 @@ use simple_logger::init_with_level;
 
 use crate::error::BiadNetError;
 use crate::store::ContentStore;
+use futures::executor::ThreadPool;
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
 
 pub struct BitcoinAdaptor {}
 
 impl BitcoinAdaptor {
-    pub fn new () -> BitcoinAdaptor {
-        BitcoinAdaptor{}
-    }
-
-    pub fn run(&mut self) {
+    pub fn start(thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
 
         let mut dispatcher = Dispatcher::new(receiver);
@@ -87,7 +84,7 @@ impl BitcoinAdaptor {
 
         let network = Network::Bitcoin;
 
-        let bitcoin_p2pconfig = BitcoinP2PConfig {
+        let p2pconfig = BitcoinP2PConfig {
             nonce: thread_rng().next_u64(),
             network,
             max_protocol_version: MAX_PROTOCOL_VERSION,
@@ -97,7 +94,7 @@ impl BitcoinAdaptor {
         };
 
         let (p2p, p2p_control) = P2P::new(
-            bitcoin_p2pconfig,
+            p2pconfig,
             PeerMessageSender::new(sender),
             10);
 
@@ -110,7 +107,6 @@ impl BitcoinAdaptor {
 
         dispatcher.add_listener(header_downloader);
 
-        let mut thread_pool = ThreadPoolBuilder::new().create().expect("can not start thread pool");
         let p2p2 = p2p.clone();
         let p2p_task = Box::new(future::poll_fn(move |ctx| {
             p2p2.run(0, ctx).unwrap();
@@ -119,8 +115,8 @@ impl BitcoinAdaptor {
         // start the task that runs all network communication
         thread_pool.spawn(p2p_task).unwrap();
 
-        // note that this call does not return
-        thread_pool.run(Self::keep_connected(network,p2p.clone(), vec!(), 3)).unwrap();
+        info!("Bitcoin p2p engine started");
+        thread_pool.spawn(Self::keep_connected(network,p2p.clone(), vec!(), 3)).unwrap();
     }
 
     fn keep_connected(network: Network, p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize) -> Box<dyn Future<Item=(), Error=Never> + Send> {

@@ -19,13 +19,22 @@
 use simple_logger;
 use log::Level;
 
+use futures::{
+    future,
+    Async, Future, Never,
+    executor::{Executor, ThreadPoolBuilder}
+};
+
 use biadne::p2p_bitcoin::BitcoinAdaptor;
 use biadne::p2p_biadnet::BiadNetAdaptor;
+use futures::future::Empty;
 
 pub fn main () {
     simple_logger::init_with_level(Level::Debug).unwrap();
     info!("biadnet starting.");
-    BitcoinAdaptor::new().run();
-    BiadNetAdaptor::new().run();
+    let mut thread_pool = ThreadPoolBuilder::new().create().expect("can not start thread pool");
+    BitcoinAdaptor::start(&mut thread_pool);
+    BiadNetAdaptor::start(&mut thread_pool);
+    thread_pool.run::<Empty<(), Never>>(future::empty()).unwrap();
 }
 
