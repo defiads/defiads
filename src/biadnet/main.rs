@@ -53,8 +53,11 @@ use std::sync::{atomic::AtomicUsize, RwLock};
 use biadne::error::BiadNetError;
 use murmel::error::MurmelError;
 use murmel::p2p::BitcoinP2PConfig;
+use murmel::chaindb::SharedChainDB;
+use bitcoin_wallet::trunk::Trunk;
 use bitcoin::network::message::NetworkMessage;
 use bitcoin::network::message::RawNetworkMessage;
+use bitcoin_hashes::sha256d;
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
 
@@ -95,7 +98,8 @@ pub fn main () {
 
     let timeout = Arc::new(Mutex::new(Timeout::new(p2p_control.clone())));
 
-    let downstream = Arc::new(Mutex::new(Driver{store: ContentStore::new()}));
+    let downstream = Arc::new(Mutex::new(Driver{store:
+        ContentStore::new(Arc::new(ChainDBTrunk{chaindb: chaindb.clone()}))}));
 
     let header_downloader = HeaderDownload::new(chaindb.clone(), p2p_control.clone(), timeout, downstream);
 
@@ -114,7 +118,7 @@ pub fn main () {
     thread_pool.run(keep_connected(network,p2p.clone(), vec!(), 3)).unwrap();
 }
 
-pub struct Driver {
+struct Driver {
     store: ContentStore
 }
 
@@ -125,8 +129,8 @@ impl Downstream for Driver {
         self.store.add_header(block).expect("can not add header");
     }
 
-    fn block_disconnected(&mut self, _: &BlockHeader) {
-        self.store.unwind_tip().expect("can not unwind tip");
+    fn block_disconnected(&mut self, header: &BlockHeader) {
+        self.store.unwind_tip(header).expect("can not unwind tip");
     }
 }
 
@@ -208,4 +212,39 @@ fn keep_connected(network: Network, p2p: Arc<P2P<NetworkMessage, RawNetworkMessa
     }
 
     Box::new(KeepConnected { network, min_connections, connections: added, p2p, dns: Vec::new(), earlier: HashSet::new() })
+}
+
+pub struct ChainDBTrunk {
+    pub chaindb: SharedChainDB
+}
+
+impl Trunk for ChainDBTrunk {
+    fn is_on_trunk(&self, block_hash: &sha256d::Hash) -> bool {
+        self.chaindb.read().unwrap().pos_on_trunk(block_hash).is_some()
+    }
+
+    fn get_header(&self, block_hash: &sha256d::Hash) -> Option<BlockHeader> {
+        if let Some(cached) = self.chaindb.read().unwrap().get_header(block_hash) {
+            return Some(cached.stored.header.clone())
+        }
+        None
+    }
+
+    fn get_height(&self, block_hash: &sha256d::Hash) -> Option<u32> {
+        self.chaindb.read().unwrap().pos_on_trunk(block_hash)
+    }
+
+    fn get_tip(&self) -> Option<BlockHeader> {
+        if let Some(cached) = self.chaindb.read().unwrap().header_tip() {
+            return Some(cached.stored.header.clone());
+        }
+        None
+    }
+
+    fn len(&self) -> u32 {
+        if let Some(cached) = self.chaindb.read().unwrap().header_tip() {
+            return cached.stored.height
+        }
+        0
+    }
 }

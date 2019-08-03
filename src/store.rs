@@ -20,12 +20,15 @@ use bitcoin::{OutPoint, BlockHeader, BitcoinHash};
 use bitcoin_hashes::{sha256d, sha256, hex::ToHex};
 use bitcoin_wallet::{proved::ProvedTransaction};
 use secp256k1::{Secp256k1, All};
+use bitcoin_wallet::trunk::Trunk;
 use std::collections::HashMap;
 use std::error;
+use std::sync::Arc;
 
 use crate::error::BiadNetError;
 use crate::content::Content;
 use crate::funding::funding_script;
+
 
 const STORAGE_LIMIT: u64 = 2^30; // 1 GiB
 
@@ -43,28 +46,18 @@ pub struct ContentStore {
     ctx: Secp256k1<All>,
     trans_store: Vec<MemStoredContent>,
     proofs: HashMap<sha256d::Hash, ProvedTransaction>,
-    headers: Vec<BlockHeader>
+    trunk: Arc<dyn Trunk + Send + Sync>
 }
 
 impl ContentStore {
     /// new content store
-    pub fn new() -> ContentStore {
+    pub fn new(trunk: Arc<dyn Trunk + Send + Sync>) -> ContentStore {
         ContentStore {
             ctx: Secp256k1::new(),
             trans_store: Vec::new(),
             proofs: HashMap::new(),
-            headers: Vec::new()
+            trunk
         }
-    }
-
-    /// get the tip hash of the header chain
-    pub fn get_tip (&self) -> Option<&BlockHeader> {
-        self.headers.last()
-    }
-
-    /// get the chain height
-    pub fn get_height(&self) -> u32 {
-        self.headers.len() as u32
     }
 
     /// add a header to the tip of the chain
@@ -72,46 +65,28 @@ impl ContentStore {
     /// before adding this header after a reorg.
     pub fn add_header(&mut self, header: &BlockHeader) -> Result<(), BiadNetError> {
         info!("new chain tip {}", header.bitcoin_hash());
-        if self.headers.len() > 0 {
-            // only append to tip
-            if self.get_tip().unwrap().bitcoin_hash() == header.prev_blockhash {
-                self.headers.push(header.clone());
-            }
-            else {
-                return Err(BiadNetError::Unsupported("only add header connected to tip"));
-            }
-        }
-        else {
-            // add genesis
-            self.headers.push(header.clone());
-        }
         Ok(())
     }
 
     /// unwind the tip
-    pub fn unwind_tip(&mut self) -> Result<(), BiadNetError> {
-        info!("unwind tip");
-        let len = self.headers.len();
-        if len > 0 {
-            // remove tip
-            self.headers.remove(len-1);
-            let lost_content = self.proofs.values()
-                .filter_map(|t| if t.get_block_height() as usize == len - 1 {
-                    Some(t.get_transaction().txid())
-                } else { None })
-                .flat_map(|txid| {
-                    self.trans_store.iter()
-                        .filter_map(move |s|
-                            if s.funding.txid == txid {Some(s.digest)} else {None})
-                }).collect::<Vec<sha256::Hash>>();
+    pub fn unwind_tip(&mut self, header: &BlockHeader) -> Result<(), BiadNetError> {
+        info!("unwind tip {}", header.bitcoin_hash());
+        let header_hash = header.bitcoin_hash();
+        let lost_content = self.proofs.values()
+            .filter_map(|t| if *t.get_block_hash() == header_hash {
+                Some(t.get_transaction().txid())
+            } else { None })
+            .flat_map(|txid| {
+                self.trans_store.iter()
+                    .filter_map(move |s|
+                        if s.funding.txid == txid {Some(s.digest)} else {None})
+            }).collect::<Vec<sha256::Hash>>();
 
-            // remove those points and associated content
-            for id in lost_content {
-                self.remove_content(&id);
-            }
-            return Ok(())
+        // remove those points and associated content
+        for id in lost_content {
+            self.remove_content(&id);
         }
-        Err(BiadNetError::Unsupported("unwind on empty chain"))
+        return Ok(())
     }
 
     /// remove a content from store
@@ -125,17 +100,18 @@ impl ContentStore {
 
     /// add content
     pub fn add_content(&mut self, content: &Content) -> Result<bool, Box<error::Error>> {
-        let height = content.funding.get_block_height();
-        if let Some(ref h) = self.headers.get(height as usize) {
-            if h.merkle_root == content.funding.merkle_root() {
-                let t = content.funding.get_transaction();
-                if t.version as u32 >= 2 {
-                    let digest = content.ad.digest();
-                    let commitment = funding_script(&content.funder, &digest, content.term, &self.ctx);
-                    if let Some((vout, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
-                        info!("add content {}", &digest);
-                        return Ok(self.add_to_trans_store(content, o.value, OutPoint { txid: t.txid(), vout: vout as u32 })?)
-                        // TODO persistent store
+        if let Some(height) = self.trunk.get_height(content.funding.get_block_hash()) {
+            if let Some(header) = self.trunk.get_header(content.funding.get_block_hash()) {
+                if header.merkle_root == content.funding.merkle_root() {
+                    let t = content.funding.get_transaction();
+                    if t.version as u32 >= 2 {
+                        let digest = content.ad.digest();
+                        let commitment = funding_script(&content.funder, &digest, content.term, &self.ctx);
+                        if let Some((vout, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
+                            info!("add content {}", &digest);
+                            return Ok(self.add_to_trans_store(content, o.value, OutPoint { txid: t.txid(), vout: vout as u32 })?)
+                            // TODO persistent store
+                        }
                     }
                 }
             }
