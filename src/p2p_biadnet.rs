@@ -259,7 +259,7 @@ impl BiadNetAdaptor {
                     if self.connections.len() == 0 {
                         // run out of peers. this is fatal
                         error!("no more peers to connect");
-                        return Ok(Async::Pending);
+                        std::thread::sleep(std::time::Duration::from_secs(10));
                     }
                     // find a finished peer
                     let finished = self.connections.iter_mut().enumerate().filter_map(|(i, f)| {
