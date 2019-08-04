@@ -67,6 +67,7 @@ use serde_cbor::{Deserializer, StreamDeserializer};
 
 const MAGIC: u32 = 0xB1AD;
 const MAX_PROTOCOL_VERSION: u32 = 1;
+const MIN_PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Clone)]
 struct BiadnetP2PConfig {
@@ -117,6 +118,10 @@ impl P2PConfig<Message, Envelope> for BiadnetP2PConfig {
 
     fn max_protocol_version(&self) -> u32 {
         self.max_protocol_version
+    }
+
+    fn min_protocol_version(&self) -> u32 {
+        MIN_PROTOCOL_VERSION
     }
 
     fn verack(&self) -> Message {
