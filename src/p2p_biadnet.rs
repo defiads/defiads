@@ -181,12 +181,14 @@ impl<'a> io::Read for PassThroughBufferReader<'a> {
 }
 
 pub struct BiadNetAdaptor{
-    connections: usize
+    connections: usize,
+    peers: Vec<SocketAddr>,
+    listen: Vec<SocketAddr>
 }
 
 impl BiadNetAdaptor {
-    pub fn new (connections: usize) -> BiadNetAdaptor {
-        BiadNetAdaptor{connections}
+    pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>) -> BiadNetAdaptor {
+        BiadNetAdaptor{connections, peers, listen}
     }
     pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
@@ -206,7 +208,7 @@ impl BiadNetAdaptor {
 
         let timeout = Arc::new(Mutex::new(Timeout::new(p2p_control.clone())));
 
-        let updater = Updater::new(p2p_control, timeout);
+        let updater = Updater::new(p2p_control.clone(), timeout);
         dispatcher.add_listener(updater);
 
         let p2p2 = p2p.clone();
@@ -214,11 +216,16 @@ impl BiadNetAdaptor {
             p2p2.run(0, ctx).unwrap();
             Ok(Async::Ready(()))
         }));
+
+        for addr in &self.listen {
+            p2p_control.send(P2PControl::Bind(addr.clone()));
+        }
+
         // start the task that runs all network communication
         thread_pool.spawn(p2p_task).unwrap();
 
         info!("BiadNet p2p engine started");
-        thread_pool.spawn(Self::keep_connected(p2p.clone(), vec!(), self.connections)).unwrap();
+        thread_pool.spawn(Self::keep_connected(p2p.clone(), self.peers.clone(), self.connections)).unwrap();
     }
 
     fn keep_connected(p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize) -> Box<dyn Future<Item=(), Error=Never> + Send> {
@@ -252,7 +259,7 @@ impl BiadNetAdaptor {
                     if self.connections.len() == 0 {
                         // run out of peers. this is fatal
                         error!("no more peers to connect");
-                        return Ok(Async::Ready(()));
+                        return Ok(Async::Pending);
                     }
                     // find a finished peer
                     let finished = self.connections.iter_mut().enumerate().filter_map(|(i, f)| {

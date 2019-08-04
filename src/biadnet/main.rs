@@ -31,6 +31,12 @@ use biadne::p2p_biadnet::BiadNetAdaptor;
 use futures::future::Empty;
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::str::FromStr;
+
+const MY_SERVER: &str = "87.230.22.85";
+const BIADNET_PORT: u16 = 8444;
+const BITCOIN_PORT: u16 = 8333;
 
 pub fn main () {
     simple_logger::init_with_level(Level::Debug).unwrap();
@@ -39,10 +45,19 @@ pub fn main () {
     let biadnet_connections = cmd.opt_arg_usize("biadnet-connections").unwrap_or(5);
     let bitcoin_connections = cmd.opt_arg_usize("bitcoin-connections").unwrap_or(5);
 
+    let biadnet_peers = get_socket_vec(cmd.opt_arg("biadnet-peers"), (MY_SERVER.to_string() + ":") + BIADNET_PORT.to_string().as_str());
+    let bitcoin_peers = get_socket_vec(cmd.opt_arg("bitcoin-peers"), (MY_SERVER.to_string() + ":") + BITCOIN_PORT.to_string().as_str());
+
+    let biadnet_listen = get_socket_vec(cmd.opt_arg("biadnet-peers"), ("127.0.0.1".to_string() + ":") + BIADNET_PORT.to_string().as_str());
+
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
-    BitcoinAdaptor::new(bitcoin_connections).start(&mut thread_pool);
-    BiadNetAdaptor::new(biadnet_connections).start(&mut thread_pool);
+    BitcoinAdaptor::new(bitcoin_connections, bitcoin_peers).start(&mut thread_pool);
+    BiadNetAdaptor::new(biadnet_connections, biadnet_peers, biadnet_listen).start(&mut thread_pool);
     thread_pool.run::<Empty<(), Never>>(future::empty()).unwrap();
+}
+
+fn get_socket_vec(s: Option<String>, default: String) -> Vec<SocketAddr> {
+    s.unwrap_or(default).split(",").map(|s| SocketAddr::from_str(s).expect("invalid biadnet socket address")).collect::<Vec<_>>()
 }
 
 struct CommandLine {
