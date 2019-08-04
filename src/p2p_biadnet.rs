@@ -59,7 +59,7 @@ use simple_logger::init_with_level;
 
 use crate::error::BiadNetError;
 use crate::store::ContentStore;
-use crate::messages::{Message, Envelope, VersionMessage, SockAddress};
+use crate::messages::{Message, Envelope, VersionMessage, NetAddress};
 use crate::updater::Updater;
 
 use murmel::p2p::Version;
@@ -91,8 +91,8 @@ impl P2PConfig<Message, Envelope> for BiadnetP2PConfig {
                 timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
                 start_height: 0, // TODO
                 user_agent: "biadnet 0.1.0".to_string(),
-                receiver: SockAddress::default(), // TODO
-                sender: SockAddress::default(), // TODO
+                receiver: NetAddress::default(), // TODO
+                sender: NetAddress::default(), // TODO
             }
         )
     }

@@ -24,6 +24,7 @@ rand = "0.7"
 log="0.4"
 simple_logger = "0.5"
 futures={ git= "https://github.com/tamasblummer/futures-rs.git", tag = "0.2.1" }
+rusqlite={version="0.20", features=["bundled"]}
 
 [dev-dependencies]
 hex="0.3"

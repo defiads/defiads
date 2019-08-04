@@ -28,7 +28,9 @@ pub enum BiadNetError {
     /// wallet related error
     Wallet(WalletError),
     /// IO error
-    IO(io::Error)
+    IO(io::Error),
+    /// DB error
+    DB(rusqlite::Error)
 }
 
 impl Error for BiadNetError {
@@ -36,15 +38,17 @@ impl Error for BiadNetError {
         match *self {
             BiadNetError::Unsupported(ref s) => s,
             BiadNetError::Wallet(ref err) => err.description(),
-            BiadNetError::IO(ref err) => err.description()
+            BiadNetError::IO(ref err) => err.description(),
+            BiadNetError::DB(ref err) => err.description()
         }
     }
 
-    fn cause(&self) -> Option<&dyn Error> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         match *self {
             BiadNetError::Unsupported(_) => None,
             BiadNetError::Wallet(ref err) => Some(err),
-            BiadNetError::IO(ref err) => Some(err)
+            BiadNetError::IO(ref err) => Some(err),
+            BiadNetError::DB(ref err) => Some(err)
         }
     }
 }
@@ -57,6 +61,7 @@ impl fmt::Display for BiadNetError {
             BiadNetError::Unsupported(ref s) => write!(f, "Unsupported: {}", s),
             BiadNetError::Wallet(ref s) => write!(f, "{}", s),
             BiadNetError::IO(ref s) => write!(f, "{}", s),
+            BiadNetError::DB(ref s) =>  write!(f, "{}", s),
         }
     }
 }
@@ -76,5 +81,17 @@ impl convert::From<WalletError> for BiadNetError {
 impl convert::From<io::Error> for BiadNetError {
     fn from(err: io::Error) -> BiadNetError {
         BiadNetError::IO(err)
+    }
+}
+
+impl convert::From<rusqlite::Error> for BiadNetError {
+    fn from(err: rusqlite::Error) -> BiadNetError {
+        BiadNetError::DB(err)
+    }
+}
+
+impl convert::From<std::net::AddrParseError> for BiadNetError {
+    fn from(_: std::net::AddrParseError) -> BiadNetError {
+        BiadNetError::IO(io::Error::from(io::ErrorKind::InvalidInput))
     }
 }

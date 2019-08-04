@@ -38,6 +38,7 @@ extern crate rand;
 extern crate murmel;
 #[macro_use]extern crate log;
 extern crate simple_logger;
+extern crate rusqlite;
 
 mod error;
 mod text;
@@ -47,6 +48,7 @@ mod messages;
 mod content;
 mod funding;
 mod store;
+mod db;
 pub mod updater;
 pub mod p2p_bitcoin;
 pub mod p2p_biadnet;
