@@ -66,7 +66,7 @@ impl TX<'_> {
     pub fn store_address(&mut self, address: &SocketAddr, last_seen: u64, banned: u64) -> Result<usize, BiadNetError>  {
         Ok(
             self.tx.execute(r#"
-                insert into address (ip, last_seen, banned) values (?1, ?2, ?3)
+                insert or replace into address (ip, last_seen, banned) values (?1, ?2, ?3)
             "#, &[&address.to_string() as &ToSql, &(last_seen as i64), &(banned as i64)])?
         )
     }
@@ -110,6 +110,7 @@ mod test {
             let mut tx = db.transaction().unwrap();
             tx.create_tables().unwrap();
             tx.store_address(&SocketAddr::from_str("127.0.0.1:8444").unwrap(), 0, 0).unwrap();
+            tx.store_address(&SocketAddr::from_str("127.0.0.1:8444").unwrap(), 1, 1).unwrap();
             tx.get_an_address(&vec!()).unwrap();
             assert!(tx.get_an_address(&vec!(SocketAddr::from_str("127.0.0.1:8444").unwrap())).unwrap().is_none());
             tx.commit().unwrap();
