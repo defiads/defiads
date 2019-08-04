@@ -48,7 +48,7 @@ pub fn main () {
     let biadnet_peers = get_socket_vec(cmd.opt_arg("biadnet-peers"), (MY_SERVER.to_string() + ":") + BIADNET_PORT.to_string().as_str());
     let bitcoin_peers = get_socket_vec(cmd.opt_arg("bitcoin-peers"), (MY_SERVER.to_string() + ":") + BITCOIN_PORT.to_string().as_str());
 
-    let biadnet_listen = get_socket_vec(cmd.opt_arg("biadnet-peers"), ("127.0.0.1".to_string() + ":") + BIADNET_PORT.to_string().as_str());
+    let biadnet_listen = get_socket_vec(cmd.opt_arg("biadnet-peers"), ("0.0.0.0".to_string() + ":") + BIADNET_PORT.to_string().as_str());
 
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
     BitcoinAdaptor::new(bitcoin_connections, bitcoin_peers).start(&mut thread_pool);
