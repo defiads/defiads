@@ -115,7 +115,7 @@ impl BitcoinAdaptor {
 
         let p2p2 = p2p.clone();
         let p2p_task = Box::new(future::poll_fn(move |ctx| {
-            p2p2.run(0, ctx).unwrap();
+            p2p2.run("bitcoin", 0, ctx).unwrap();
             Ok(Async::Ready(()))
         }));
         // start the task that runs all network communication
@@ -130,7 +130,7 @@ impl BitcoinAdaptor {
         // add initial peers if any
         let mut added = Vec::new();
         for addr in &peers {
-            added.push(p2p.add_peer(PeerSource::Outgoing(addr.clone())));
+            added.push(p2p.add_peer("bitcoin", PeerSource::Outgoing(addr.clone())));
         }
 
         struct KeepConnected {
@@ -196,7 +196,7 @@ impl BitcoinAdaptor {
                     if self.dns.len() > 0 {
                         let mut rng = thread_rng();
                         let addr = self.dns[(rng.next_u64() as usize) % self.dns.len()];
-                        self.connections.push(self.p2p.add_peer(PeerSource::Outgoing(addr)));
+                        self.connections.push(self.p2p.add_peer("bitcoin", PeerSource::Outgoing(addr)));
                     }
                 }
             }
