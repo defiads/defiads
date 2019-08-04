@@ -180,10 +180,15 @@ impl<'a> io::Read for PassThroughBufferReader<'a> {
     }
 }
 
-pub struct BiadNetAdaptor{}
+pub struct BiadNetAdaptor{
+    connections: usize
+}
 
 impl BiadNetAdaptor {
-    pub fn start(thread_pool: &mut ThreadPool) {
+    pub fn new (connections: usize) -> BiadNetAdaptor {
+        BiadNetAdaptor{connections}
+    }
+    pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
         let mut dispatcher = Dispatcher::new(receiver);
 
@@ -213,7 +218,7 @@ impl BiadNetAdaptor {
         thread_pool.spawn(p2p_task).unwrap();
 
         info!("BiadNet p2p engine started");
-        thread_pool.spawn(Self::keep_connected(p2p.clone(), vec!(), 3)).unwrap();
+        thread_pool.spawn(Self::keep_connected(p2p.clone(), vec!(), self.connections)).unwrap();
     }
 
     fn keep_connected(p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize) -> Box<dyn Future<Item=(), Error=Never> + Send> {

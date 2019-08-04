@@ -18,6 +18,7 @@
 
 use simple_logger;
 use log::Level;
+use std::env::args;
 
 use futures::{
     future,
@@ -29,12 +30,81 @@ use biadne::p2p_bitcoin::BitcoinAdaptor;
 use biadne::p2p_biadnet::BiadNetAdaptor;
 use futures::future::Empty;
 
+use std::collections::HashMap;
+
 pub fn main () {
     simple_logger::init_with_level(Level::Debug).unwrap();
     info!("biadnet starting.");
+    let cmd = CommandLine::new();
+    let biadnet_connections = cmd.opt_arg_usize("biadnet-connections").unwrap_or(5);
+    let bitcoin_connections = cmd.opt_arg_usize("bitcoin-connections").unwrap_or(5);
+
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
-    BitcoinAdaptor::start(&mut thread_pool);
-    BiadNetAdaptor::start(&mut thread_pool);
+    BitcoinAdaptor::new(bitcoin_connections).start(&mut thread_pool);
+    BiadNetAdaptor::new(biadnet_connections).start(&mut thread_pool);
     thread_pool.run::<Empty<(), Never>>(future::empty()).unwrap();
 }
 
+struct CommandLine {
+    pub arguments: Vec<String>,
+    options: HashMap<String, Option<String>>
+}
+
+impl CommandLine {
+    pub fn has_opt (&self, opt: &str) -> bool {
+        self.options.contains_key(&opt.to_string())
+    }
+
+    pub fn opt_arg (&self, opt: &str) -> Option<String> {
+        if let Some(a) = self.options.get(&opt.to_string()) {
+            return a.clone();
+        }
+        None
+    }
+
+    pub fn opt_arg_usize (&self, opt: &str) -> Option<usize> {
+        if let Some(a) = self.options.get(&opt.to_string()) {
+            if let Some(s) = a {
+                if let Ok(n) = s.parse::<usize>() {
+                    return Some(n);
+                }
+            }
+        }
+        None
+    }
+
+
+    pub fn new () -> CommandLine {
+        let mut arguments = Vec::new();
+        let mut options = HashMap::new();
+        let mut oi = args().skip(1).take_while(|a| a.as_str() != "--");
+        let mut next = oi.next();
+        while let Some(ref a) = next {
+            if a.starts_with("--") {
+                let (_, option) = a.split_at(2);
+                if let Some(ref optargs) = oi.next() {
+                    if optargs.starts_with("--") {
+                        options.insert(option.to_string(), None);
+                        next = Some(optargs.clone());
+                    }
+                    else {
+                        options.insert(option.to_string(), Some(optargs.clone()));
+                        next = oi.next();
+                    }
+                }
+                else {
+                    options.insert(option.to_string(), None);
+                    next = None;
+                }
+            }
+            else {
+                arguments.push(a.clone());
+                next = oi.next();
+            }
+        }
+        for a in args().skip_while(|a| a.as_str() != "--").skip(1) {
+            arguments.push(a);
+        }
+        CommandLine{arguments, options}
+    }
+}

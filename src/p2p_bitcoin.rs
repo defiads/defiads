@@ -62,10 +62,15 @@ use futures::executor::ThreadPool;
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
 
-pub struct BitcoinAdaptor {}
+pub struct BitcoinAdaptor {
+    connections: usize
+}
 
 impl BitcoinAdaptor {
-    pub fn start(thread_pool: &mut ThreadPool) {
+    pub fn new (connections: usize) -> BitcoinAdaptor {
+        BitcoinAdaptor{connections}
+    }
+    pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
 
         let mut dispatcher = Dispatcher::new(receiver);
@@ -116,7 +121,7 @@ impl BitcoinAdaptor {
         thread_pool.spawn(p2p_task).unwrap();
 
         info!("Bitcoin p2p engine started");
-        thread_pool.spawn(Self::keep_connected(network,p2p.clone(), vec!(), 3)).unwrap();
+        thread_pool.spawn(Self::keep_connected(network,p2p.clone(), vec!(), self.connections)).unwrap();
     }
 
     fn keep_connected(network: Network, p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize) -> Box<dyn Future<Item=(), Error=Never> + Send> {
