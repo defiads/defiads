@@ -45,7 +45,7 @@ const BITCOIN_PORT: u16 = 8333;
 
 pub fn main () {
     let cmd = CommandLine::new();
-    let loglevel = Level::from_str(cmd.opt_arg("log-level").unwrap_or("debug".to_string()).as_str());
+    let loglevel = Level::from_str(cmd.opt_arg("log-level").unwrap_or("debug".to_string()).as_str()).expect("unkown log level use one of: OFF ERROR WARN INFO DEBUG TRACE");
 
     simple_logger::init_with_level(loglevel).unwrap();
     info!("biadnet starting.");
