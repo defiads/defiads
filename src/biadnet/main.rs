@@ -26,13 +26,16 @@ use futures::{
     executor::{Executor, ThreadPoolBuilder}
 };
 
+use bitcoin::network::constants::Network;
 use biadne::p2p_bitcoin::BitcoinAdaptor;
 use biadne::p2p_biadnet::BiadNetAdaptor;
 use futures::future::Empty;
+use murmel::chaindb::ChainDB;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::sync::{Arc,RwLock};
 
 const MY_SERVER: &str = "87.230.22.85";
 const BIADNET_PORT: u16 = 8444;
@@ -42,6 +45,7 @@ pub fn main () {
     simple_logger::init_with_level(Level::Debug).unwrap();
     info!("biadnet starting.");
     let cmd = CommandLine::new();
+    let bitcoin_network = Network::from_str(cmd.opt_arg("bitcoin_network").unwrap_or("bitcoin".to_string()).as_str()).expect("unkown Bitcoin network");
     let biadnet_connections = cmd.opt_arg_usize("biadnet-connections").unwrap_or(5);
     let bitcoin_connections = cmd.opt_arg_usize("bitcoin-connections").unwrap_or(5);
 
@@ -50,9 +54,13 @@ pub fn main () {
 
     let biadnet_listen = get_socket_vec(cmd.opt_arg("biadnet-peers"), ("0.0.0.0".to_string() + ":") + BIADNET_PORT.to_string().as_str());
 
+    let db_name = cmd.opt_arg("db").unwrap_or("biadnet".to_string()).clone();
+    let chaindb = Arc::new(RwLock::new(ChainDB::new(&std::path::Path::new(&db_name),
+                                                    bitcoin_network, 0).expect("can not open db")));
+
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
-    BitcoinAdaptor::new(bitcoin_connections, bitcoin_peers).start(&mut thread_pool);
-    BiadNetAdaptor::new(biadnet_connections, biadnet_peers, biadnet_listen).start(&mut thread_pool);
+    BitcoinAdaptor::new(bitcoin_network, bitcoin_connections, bitcoin_peers, chaindb.clone()).start(&mut thread_pool);
+    BiadNetAdaptor::new(biadnet_connections, biadnet_peers, biadnet_listen, chaindb.clone()).start(&mut thread_pool);
     thread_pool.run::<Empty<(), Never>>(future::empty()).unwrap();
 }
 

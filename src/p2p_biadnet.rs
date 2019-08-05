@@ -188,12 +188,13 @@ impl<'a> io::Read for PassThroughBufferReader<'a> {
 pub struct BiadNetAdaptor{
     connections: usize,
     peers: Vec<SocketAddr>,
-    listen: Vec<SocketAddr>
+    listen: Vec<SocketAddr>,
+    chaindb: SharedChainDB
 }
 
 impl BiadNetAdaptor {
-    pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>) -> BiadNetAdaptor {
-        BiadNetAdaptor{connections, peers, listen}
+    pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>, chaindb: SharedChainDB) -> BiadNetAdaptor {
+        BiadNetAdaptor{connections, peers, listen, chaindb}
     }
     pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);

@@ -64,35 +64,33 @@ const MAX_PROTOCOL_VERSION: u32 = 70001;
 
 pub struct BitcoinAdaptor {
     connections: usize,
-    peers: Vec<SocketAddr>
+    peers: Vec<SocketAddr>,
+    chaindb: SharedChainDB,
+    network: Network
 }
 
 impl BitcoinAdaptor {
-    pub fn new (connections: usize, peers: Vec<SocketAddr>) -> BitcoinAdaptor {
-        BitcoinAdaptor{connections, peers}
+    pub fn new (network: Network, connections: usize, peers: Vec<SocketAddr>, chaindb: SharedChainDB) -> BitcoinAdaptor {
+        BitcoinAdaptor{connections, peers, chaindb, network}
     }
     pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
 
         let mut dispatcher = Dispatcher::new(receiver);
 
-        let chaindb = Arc::new(RwLock::new(
-            ChainDB::new(&Path::new("headers"), Network::Bitcoin, 0).expect("can not open db")));
-        chaindb.write().unwrap().init(false).expect("can not initialize db");
+        self.chaindb.write().unwrap().init(false).expect("can not initialize db");
 
         let height =
-            if let Some(tip) = chaindb.read().unwrap().header_tip() {
+            if let Some(tip) = self.chaindb.read().unwrap().header_tip() {
                 AtomicUsize::new(tip.stored.height as usize)
             }
             else {
                 AtomicUsize::new(0)
             };
 
-        let network = Network::Bitcoin;
-
         let p2pconfig = BitcoinP2PConfig {
             nonce: thread_rng().next_u64(),
-            network,
+            network: self.network,
             max_protocol_version: MAX_PROTOCOL_VERSION,
             user_agent: "biadnet 0.1.0".to_string(),
             server: false,
@@ -107,9 +105,9 @@ impl BitcoinAdaptor {
         let timeout = Arc::new(Mutex::new(Timeout::new(p2p_control.clone())));
 
         let downstream = Arc::new(Mutex::new(BitcoinDriver{store:
-        ContentStore::new(Arc::new(ChainDBTrunk{chaindb: chaindb.clone()}))}));
+        ContentStore::new(Arc::new(ChainDBTrunk{chaindb: self.chaindb.clone()}))}));
 
-        let header_downloader = HeaderDownload::new(chaindb.clone(), p2p_control.clone(), timeout, downstream);
+        let header_downloader = HeaderDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout, downstream);
 
         dispatcher.add_listener(header_downloader);
 
@@ -122,7 +120,7 @@ impl BitcoinAdaptor {
         thread_pool.spawn(p2p_task).unwrap();
 
         info!("Bitcoin p2p engine started");
-        thread_pool.spawn(Self::keep_connected(network,p2p.clone(), self.peers.clone(), self.connections)).unwrap();
+        thread_pool.spawn(Self::keep_connected(self.network,p2p.clone(), self.peers.clone(), self.connections)).unwrap();
     }
 
     fn keep_connected(network: Network, p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize) -> Box<dyn Future<Item=(), Error=Never> + Send> {
