@@ -277,7 +277,7 @@ impl AddressPoolMaintainer {
                             let mut tx = db.transaction();
                             for a in &av {
                                 if let Ok(addr) = a.1.socket_addr() {
-                                    debug!("received address {} peer={}", &addr, pid);
+                                    debug!("received and stored address {} peer={}", &addr, pid);
                                     tx.store_address("bitcoin", &addr, a.0 as u64, 0).unwrap();
                                 }
                             }
