@@ -18,7 +18,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::{IpAddr, SocketAddr, SocketAddrV4},
     path::Path,
-    time::Duration,
+    time::{SystemTime, UNIX_EPOCH, Duration},
     thread,
     sync::{Arc, Mutex, RwLock, mpsc, atomic::AtomicUsize}
 };
@@ -246,6 +246,30 @@ impl AddressPoolMaintainer {
     fn run(&mut self, receiver: PeerMessageReceiver<NetworkMessage>) {
         while let Ok(msg) = receiver.recv () {
             match msg {
+                PeerMessage::Connected(pid) => {
+                    if let Some(address) = self.p2p.peer_address(pid) {
+                        let mut db = self.db.lock().unwrap();
+                        let mut tx = db.transaction();
+                        debug!("store successful connection to {} peer={}", &address, pid);
+                        tx.store_address("bitcoin", &address,
+                                         SystemTime::now().duration_since(
+                                             SystemTime::UNIX_EPOCH).unwrap().as_secs(), 0).unwrap();
+                        tx.commit();
+                    }
+                }
+                PeerMessage::Disconnected(pid, banned) => {
+                    if banned {
+                        if let Some(address) = self.p2p.peer_address(pid) {
+                            let mut db = self.db.lock().unwrap();
+                            let mut tx = db.transaction();
+                            let now = SystemTime::now().duration_since(
+                                SystemTime::UNIX_EPOCH).unwrap().as_secs();
+                            debug!("store ban of {} peer={}", &address, pid);
+                            tx.store_address("bitcoin", &address, 0, now).unwrap();
+                            tx.commit();
+                        }
+                    }
+                }
                 PeerMessage::Message(pid, msg) => {
                     match msg {
                         NetworkMessage::Addr(av) => {

@@ -46,7 +46,7 @@ impl Updater {
                 match msg {
                     PeerMessage::Connected(pid) => {
                     }
-                    PeerMessage::Disconnected(_) => {
+                    PeerMessage::Disconnected(_,_) => {
                     }
                     PeerMessage::Message(pid, msg) => {
                         match msg {
