@@ -44,9 +44,12 @@ const BIADNET_PORT: u16 = 8444;
 const BITCOIN_PORT: u16 = 8333;
 
 pub fn main () {
-    simple_logger::init_with_level(Level::Debug).unwrap();
-    info!("biadnet starting.");
     let cmd = CommandLine::new();
+    let loglevel = Level::from_str(cmd.opt_arg("log-level").unwrap_or("debug".to_string()).as_str());
+
+    simple_logger::init_with_level(loglevel).unwrap();
+    info!("biadnet starting.");
+
     let bitcoin_network = Network::from_str(cmd.opt_arg("bitcoin_network").unwrap_or("bitcoin".to_string()).as_str()).expect("unkown Bitcoin network");
     let biadnet_connections = cmd.opt_arg_usize("biadnet-connections").unwrap_or(5);
     let bitcoin_connections = cmd.opt_arg_usize("bitcoin-connections").unwrap_or(5);
