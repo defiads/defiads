@@ -15,9 +15,11 @@
 //
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     net::{IpAddr, SocketAddr, SocketAddrV4},
     path::Path,
+    time::Duration,
+    thread,
     sync::{Arc, Mutex, RwLock, mpsc, atomic::AtomicUsize}
 };
 use bitcoin::{
@@ -48,11 +50,11 @@ use murmel::{
     headerdownload::HeaderDownload,
     ping::Ping,
     p2p::{
-        PeerMessageSender, PeerSource,
+        PeerMessageSender, PeerSource, P2PControlSender, PeerMessage, PeerMessageReceiver,
         BitcoinP2PConfig,
-        P2PControl
+        P2PControl, PeerId
     },
-    timeout::Timeout
+    timeout::{SharedTimeout, Timeout, ExpectedReply}
 };
 use rand::{RngCore, thread_rng};
 use simple_logger::init_with_level;
@@ -111,11 +113,9 @@ impl P2PBitcoin {
         let downstream = Arc::new(Mutex::new(BitcoinDriver{store:
         ContentStore::new(Arc::new(ChainDBTrunk{chaindb: self.chaindb.clone()}))}));
 
-        let header_downloader = HeaderDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout.clone(), downstream);
-        let ping = Ping::new(p2p_control.clone(), timeout);
-
-        dispatcher.add_listener(header_downloader);
-        dispatcher.add_listener(ping);
+        dispatcher.add_listener(AddressPoolMaintainer::new(p2p_control.clone(), self.db.clone()));
+        dispatcher.add_listener(HeaderDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout.clone(), downstream));
+        dispatcher.add_listener(Ping::new(p2p_control.clone(), timeout.clone()));
 
         let p2p2 = p2p.clone();
         let p2p_task = Box::new(future::poll_fn(move |ctx| {
@@ -228,6 +228,45 @@ impl P2PBitcoin {
     }
 }
 
+struct AddressPoolMaintainer {
+    p2p: P2PControlSender<NetworkMessage>,
+    db: SharedDB
+}
+
+impl AddressPoolMaintainer {
+    pub fn new(p2p: P2PControlSender<NetworkMessage>, db: SharedDB) -> PeerMessageSender<NetworkMessage>  {
+        let (sender, receiver) = mpsc::sync_channel(p2p.back_pressure);
+        let mut m = AddressPoolMaintainer { p2p, db };
+
+        thread::Builder::new().name("address pool".to_string()).spawn(move || { m.run(receiver) }).unwrap();
+
+        PeerMessageSender::new(sender)
+    }
+
+    fn run(&mut self, receiver: PeerMessageReceiver<NetworkMessage>) {
+        while let Ok(msg) = receiver.recv () {
+            match msg {
+                PeerMessage::Message(pid, msg) => {
+                    match msg {
+                        NetworkMessage::Addr(av) => {
+                            let mut db = self.db.lock().unwrap();
+                            let mut tx = db.transaction();
+                            for a in &av {
+                                if let Ok(addr) = a.1.socket_addr() {
+                                    debug!("received address {} peer={}", &addr, pid);
+                                    tx.store_address("bitcoin", &addr, a.0 as u64, 0).unwrap();
+                                }
+                            }
+                            tx.commit();
+                        }
+                        _ => { }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
 
 struct BitcoinDriver {
     store: ContentStore

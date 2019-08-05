@@ -69,7 +69,14 @@ impl<'db> TX<'db> {
         "#).expect("failed to create db tables");
     }
 
-    pub fn store_address(&mut self, network: &str, address: &SocketAddr, last_seen: u64, banned: u64) -> Result<usize, BiadNetError>  {
+    pub fn store_address(&mut self, network: &str, address: &SocketAddr, mut last_seen: u64, mut banned: u64) -> Result<usize, BiadNetError>  {
+        if let Ok((ls, b)) = self.tx.query_row(r#"
+                select last_seen, banned from address where network = ?1 and ip = ?2
+            "#, &[&network.to_string() as &dyn ToSql, &address.to_string()], |r| Ok((r.get(0).unwrap_or(0i64), r.get(1).unwrap_or(0i64)))) {
+            // do not reduce last_seen or banned fields
+            last_seen = std::cmp::max(ls as u64, last_seen);
+            banned = std::cmp::max(b as u64, banned);
+        }
         Ok(
             self.tx.execute(r#"
                 insert or replace into address (network, ip, last_seen, banned) values (?1, ?2, ?3, ?4)
