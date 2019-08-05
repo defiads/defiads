@@ -46,6 +46,7 @@ use murmel::{
     downstream::Downstream,
     error::MurmelError,
     headerdownload::HeaderDownload,
+    ping::Ping,
     p2p::{
         PeerMessageSender, PeerSource,
         BitcoinP2PConfig,
@@ -64,7 +65,7 @@ use futures::executor::ThreadPool;
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
 
-pub struct BitcoinAdaptor {
+pub struct P2PBitcoin {
     connections: usize,
     peers: Vec<SocketAddr>,
     chaindb: SharedChainDB,
@@ -72,9 +73,9 @@ pub struct BitcoinAdaptor {
     db: SharedDB
 }
 
-impl BitcoinAdaptor {
-    pub fn new (network: Network, connections: usize, peers: Vec<SocketAddr>, chaindb: SharedChainDB, db: SharedDB) -> BitcoinAdaptor {
-        BitcoinAdaptor{connections, peers, chaindb, network, db}
+impl P2PBitcoin {
+    pub fn new (network: Network, connections: usize, peers: Vec<SocketAddr>, chaindb: SharedChainDB, db: SharedDB) -> P2PBitcoin {
+        P2PBitcoin {connections, peers, chaindb, network, db}
     }
     pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
@@ -110,9 +111,11 @@ impl BitcoinAdaptor {
         let downstream = Arc::new(Mutex::new(BitcoinDriver{store:
         ContentStore::new(Arc::new(ChainDBTrunk{chaindb: self.chaindb.clone()}))}));
 
-        let header_downloader = HeaderDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout, downstream);
+        let header_downloader = HeaderDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout.clone(), downstream);
+        let ping = Ping::new(p2p_control.clone(), timeout);
 
         dispatcher.add_listener(header_downloader);
+        dispatcher.add_listener(ping);
 
         let p2p2 = p2p.clone();
         let p2p_task = Box::new(future::poll_fn(move |ctx| {

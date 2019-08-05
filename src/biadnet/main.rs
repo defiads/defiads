@@ -27,8 +27,8 @@ use futures::{
 };
 
 use bitcoin::network::constants::Network;
-use biadne::p2p_bitcoin::BitcoinAdaptor;
-use biadne::p2p_biadnet::BiadNetAdaptor;
+use biadne::p2p_bitcoin::P2PBitcoin;
+use biadne::p2p_biadnet::P2PBiadNet;
 use biadne::db::DB;
 use futures::future::Empty;
 use murmel::chaindb::ChainDB;
@@ -71,8 +71,8 @@ pub fn main () {
     let db = Arc::new(Mutex::new(db));
 
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
-    BitcoinAdaptor::new(bitcoin_network, bitcoin_connections, bitcoin_peers, chaindb.clone(), db.clone()).start(&mut thread_pool);
-    BiadNetAdaptor::new(biadnet_connections, biadnet_peers, biadnet_listen, chaindb.clone(), db.clone()).start(&mut thread_pool);
+    P2PBitcoin::new(bitcoin_network, bitcoin_connections, bitcoin_peers, chaindb.clone(), db.clone()).start(&mut thread_pool);
+    P2PBiadNet::new(biadnet_connections, biadnet_peers, biadnet_listen, chaindb.clone(), db.clone()).start(&mut thread_pool);
     thread_pool.run::<Empty<(), Never>>(future::empty()).unwrap();
 }
 

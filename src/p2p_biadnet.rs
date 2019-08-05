@@ -186,7 +186,7 @@ impl<'a> io::Read for PassThroughBufferReader<'a> {
     }
 }
 
-pub struct BiadNetAdaptor{
+pub struct P2PBiadNet {
     connections: usize,
     peers: Vec<SocketAddr>,
     listen: Vec<SocketAddr>,
@@ -194,9 +194,9 @@ pub struct BiadNetAdaptor{
     db: SharedDB
 }
 
-impl BiadNetAdaptor {
-    pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>, chaindb: SharedChainDB, db: SharedDB) -> BiadNetAdaptor {
-        BiadNetAdaptor{connections, peers, listen, chaindb, db}
+impl P2PBiadNet {
+    pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>, chaindb: SharedChainDB, db: SharedDB) -> P2PBiadNet {
+        P2PBiadNet {connections, peers, listen, chaindb, db}
     }
     pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
