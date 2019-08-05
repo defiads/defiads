@@ -58,7 +58,9 @@ use simple_logger::init_with_level;
 
 use crate::error::BiadNetError;
 use crate::store::ContentStore;
+use crate::db::SharedDB;
 use futures::executor::ThreadPool;
+
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
 
@@ -66,12 +68,13 @@ pub struct BitcoinAdaptor {
     connections: usize,
     peers: Vec<SocketAddr>,
     chaindb: SharedChainDB,
-    network: Network
+    network: Network,
+    db: SharedDB
 }
 
 impl BitcoinAdaptor {
-    pub fn new (network: Network, connections: usize, peers: Vec<SocketAddr>, chaindb: SharedChainDB) -> BitcoinAdaptor {
-        BitcoinAdaptor{connections, peers, chaindb, network}
+    pub fn new (network: Network, connections: usize, peers: Vec<SocketAddr>, chaindb: SharedChainDB, db: SharedDB) -> BitcoinAdaptor {
+        BitcoinAdaptor{connections, peers, chaindb, network, db}
     }
     pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);

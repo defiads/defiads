@@ -48,7 +48,7 @@ mod messages;
 mod content;
 mod funding;
 mod store;
-mod db;
+pub mod db;
 pub mod updater;
 pub mod p2p_bitcoin;
 pub mod p2p_biadnet;

@@ -19,10 +19,13 @@ use std::net::SocketAddr;
 use crate::error::BiadNetError;
 use std::time::SystemTime;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 use rand::{thread_rng, RngCore, Rng};
 use futures::{FutureExt, StreamExt};
 
-struct DB {
+pub type SharedDB = Arc<Mutex<DB>>;
+
+pub struct DB {
     connection: Connection
 }
 
@@ -79,7 +82,7 @@ impl TX<'_> {
 
     // get an address not banned during the last day
     // the probability to be selected is exponentially higher for those with higher last_seen time
-    pub fn get_an_address(&mut self, other_than: &Vec<SocketAddr>) -> Result<Option<SocketAddr>, BiadNetError> {
+    pub fn get_an_address(&self, other_than: &Vec<SocketAddr>) -> Result<Option<SocketAddr>, BiadNetError> {
         const BAN_TIME: u64 = 60*60*24; // a day
 
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();

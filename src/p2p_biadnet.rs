@@ -64,6 +64,7 @@ use crate::updater::Updater;
 
 use murmel::p2p::Version;
 use serde_cbor::{Deserializer, StreamDeserializer};
+use crate::db::SharedDB;
 
 const MAGIC: u32 = 0xB1AD;
 const MAX_PROTOCOL_VERSION: u32 = 1;
@@ -189,12 +190,13 @@ pub struct BiadNetAdaptor{
     connections: usize,
     peers: Vec<SocketAddr>,
     listen: Vec<SocketAddr>,
-    chaindb: SharedChainDB
+    chaindb: SharedChainDB,
+    db: SharedDB
 }
 
 impl BiadNetAdaptor {
-    pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>, chaindb: SharedChainDB) -> BiadNetAdaptor {
-        BiadNetAdaptor{connections, peers, listen, chaindb}
+    pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>, chaindb: SharedChainDB, db: SharedDB) -> BiadNetAdaptor {
+        BiadNetAdaptor{connections, peers, listen, chaindb, db}
     }
     pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
