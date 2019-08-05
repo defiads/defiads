@@ -20,6 +20,7 @@ use crate::error::BiadNetError;
 use std::time::SystemTime;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+use std::collections::HashSet;
 use rand::{thread_rng, RngCore, Rng};
 use futures::{FutureExt, StreamExt};
 
@@ -38,8 +39,8 @@ impl DB {
         Ok(DB{connection: Connection::open(path)?})
     }
 
-    pub fn transaction(&mut self) -> Result<TX, BiadNetError> {
-        Ok(TX{tx: self.connection.transaction()?})
+    pub fn transaction(&mut self) -> TX {
+        TX{tx: self.connection.transaction().expect("can not start db transaction")}
     }
 }
 
@@ -47,42 +48,44 @@ pub struct TX<'db> {
     tx: Transaction<'db>
 }
 
-impl TX<'_> {
-    pub fn commit (self) -> Result<(), BiadNetError> {
-        Ok(self.tx.commit()?)
+impl<'db> TX<'db> {
+    pub fn commit (self) {
+        self.tx.commit().expect("failed to commit db transaction");
     }
 
-    pub fn rollback(self) -> Result<(), BiadNetError> {
-        Ok(self.tx.rollback()?)
+    pub fn rollback(self) {
+        self.tx.rollback().expect("failed to roll back db transaction");
     }
 
-    pub fn create_tables (&mut self) -> Result<(), BiadNetError> {
-        Ok(self.tx.execute_batch(r#"
+    pub fn create_tables (&mut self) {
+        self.tx.execute_batch(r#"
             create table if not exists address (
-                ip text primary key,
+                network text,
+                ip text,
                 last_seen number,
-                banned number
+                banned number,
+                primary key(network, ip)
             ) without rowid
-        "#)?)
+        "#).expect("failed to create db tables");
     }
 
-    pub fn store_address(&mut self, address: &SocketAddr, last_seen: u64, banned: u64) -> Result<usize, BiadNetError>  {
+    pub fn store_address(&mut self, network: &str, address: &SocketAddr, last_seen: u64, banned: u64) -> Result<usize, BiadNetError>  {
         Ok(
             self.tx.execute(r#"
-                insert or replace into address (ip, last_seen, banned) values (?1, ?2, ?3)
-            "#, &[&address.to_string() as &ToSql, &(last_seen as i64), &(banned as i64)])?
+                insert or replace into address (network, ip, last_seen, banned) values (?1, ?2, ?3, ?4)
+            "#, &[&network.to_string() as &dyn ToSql, &address.to_string(), &(last_seen as i64), &(banned as i64)])?
         )
     }
 
-    pub fn delete_address(&mut self, address: &SocketAddr) -> Result<usize, BiadNetError>  {
+    pub fn delete_address(&mut self, network: &str, address: &SocketAddr) -> Result<usize, BiadNetError>  {
         Ok(self.tx.execute(r#"
-                delete from address where ip = ?1
-            "#, &[&address.to_string() as &ToSql])?)
+                delete from address where ip = ?1 and network = ?2
+            "#, &[&address.to_string() as &dyn ToSql, &network.to_string()])?)
     }
 
     // get an address not banned during the last day
     // the probability to be selected is exponentially higher for those with higher last_seen time
-    pub fn get_an_address(&self, other_than: &Vec<SocketAddr>) -> Result<Option<SocketAddr>, BiadNetError> {
+    pub fn get_an_address(&self, other_than: &HashSet<SocketAddr>) -> Result<Option<SocketAddr>, BiadNetError> {
         const BAN_TIME: u64 = 60*60*24; // a day
 
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
@@ -92,7 +95,7 @@ impl TX<'_> {
         let eligible = statement.query_map_named::<String, _>(&[(":banned", &((now - BAN_TIME) as i64))],
                                                  |row| row.get(0))?
             .filter_map(|r| match r { Ok(ref s) => Some(s.clone()), _ => None})
-            .filter(move |s| !other_than.iter().any(move |o| *s == o.to_string()))
+            .filter(move |s| !other_than.contains(&SocketAddr::from_str(s).expect("address stored in db should be parsable")))
             .collect::<Vec<String>>();
         let len = eligible.len();
         if len == 0 {
@@ -110,17 +113,17 @@ mod test {
     pub fn test_db () {
         let mut db = DB::memory().unwrap();
         {
-            let mut tx = db.transaction().unwrap();
-            tx.create_tables().unwrap();
-            tx.store_address(&SocketAddr::from_str("127.0.0.1:8444").unwrap(), 0, 0).unwrap();
-            tx.store_address(&SocketAddr::from_str("127.0.0.1:8444").unwrap(), 1, 1).unwrap();
-            tx.get_an_address(&vec!()).unwrap();
-            assert!(tx.get_an_address(&vec!(SocketAddr::from_str("127.0.0.1:8444").unwrap())).unwrap().is_none());
-            tx.commit().unwrap();
+            let mut tx = db.transaction();
+            tx.create_tables();
+            tx.store_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap(), 0, 0).unwrap();
+            tx.store_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap(), 1, 1).unwrap();
+            tx.get_an_address(&HashSet::new()).unwrap();
+            assert!(tx.get_an_address(&vec!(SocketAddr::from_str("127.0.0.1:8444").unwrap()).iter().cloned().collect::<HashSet<SocketAddr>>()).unwrap().is_none());
+            tx.commit();
         }
         {
-            let mut tx = db.transaction().unwrap();
-            tx.delete_address(&SocketAddr::from_str("127.0.0.1:8444").unwrap()).unwrap();
+            let mut tx = db.transaction();
+            tx.delete_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap()).unwrap();
         }
     }
 }

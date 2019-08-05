@@ -123,10 +123,10 @@ impl BitcoinAdaptor {
         thread_pool.spawn(p2p_task).unwrap();
 
         info!("Bitcoin p2p engine started");
-        thread_pool.spawn(Self::keep_connected(self.network,p2p.clone(), self.peers.clone(), self.connections)).unwrap();
+        thread_pool.spawn(Self::keep_connected(self.network,p2p.clone(), self.peers.clone(), self.connections, self.db.clone())).unwrap();
     }
 
-    fn keep_connected(network: Network, p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize) -> Box<dyn Future<Item=(), Error=Never> + Send> {
+    fn keep_connected(network: Network, p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize, db: SharedDB) -> Box<dyn Future<Item=(), Error=Never> + Send> {
 
         // add initial peers if any
         let mut added = Vec::new();
@@ -134,13 +134,16 @@ impl BitcoinAdaptor {
             added.push(p2p.add_peer("bitcoin", PeerSource::Outgoing(addr.clone())));
         }
 
+        return Box::new( KeepConnected { network, min_connections, connections: added, p2p, dns: Vec::new(), earlier: HashSet::new(), db });
+
         struct KeepConnected {
             network: Network,
             min_connections: usize,
             connections: Vec<Box<dyn Future<Item=SocketAddr, Error=MurmelError> + Send>>,
             p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>,
             dns: Vec<SocketAddr>,
-            earlier: HashSet<SocketAddr>
+            earlier: HashSet<SocketAddr>,
+            db: SharedDB
         }
 
         // this task runs until it runs out of peers
@@ -151,14 +154,14 @@ impl BitcoinAdaptor {
             fn poll(&mut self, cx: &mut task::Context) -> Poll<Self::Item, Self::Error> {
                 // return from this loop with 'pending' if enough peers are connected
                 loop {
-                    // add further peers from db if needed
-                    self.peers_from_db();
-                    self.dns_lookup();
-
-                    if self.connections.len() == 0 {
-                        // run out of peers. this is fatal
-                        error!("no more peers to connect");
-                        return Ok(Async::Ready(()));
+                    while self.connections.len() < self.min_connections {
+                        if let Some(addr) = self.get_an_address() {
+                            self.connections.push(self.p2p.add_peer("bitcoin", PeerSource::Outgoing(addr)));
+                        }
+                        else {
+                            error!("no more peers to connect");
+                            return Ok(Async::Ready(()));
+                        }
                     }
                     // find a finished peer
                     let finished = self.connections.iter_mut().enumerate().filter_map(|(i, f)| {
@@ -185,8 +188,25 @@ impl BitcoinAdaptor {
         }
 
         impl KeepConnected {
-            fn peers_from_db(&mut self) {
-                // TODO
+            fn get_an_address(&mut self) -> Option<SocketAddr> {
+                if let Ok(Some(a)) = self.db.lock().unwrap().transaction().get_an_address(&self.earlier) {
+                    self.earlier.insert(a);
+                    return Some(a);
+                }
+                if self.dns.len() == 0 {
+                    self.dns = dns_seed(self.network);
+                    let mut db = self.db.lock().unwrap();
+                    let mut tx = db.transaction();
+                    for a in &self.dns {
+                        tx.store_address("bitcoin", a, 0, 0).expect("can not store addresses in db");
+                    }
+                    tx.commit();
+                }
+                if self.dns.len() > 0 {
+                    let mut rng = thread_rng();
+                    return Some(self.dns[(rng.next_u32() as usize) % self.dns.len()]);
+                }
+                None
             }
 
             fn dns_lookup(&mut self) {
@@ -202,8 +222,6 @@ impl BitcoinAdaptor {
                 }
             }
         }
-
-        Box::new(KeepConnected { network, min_connections, connections: added, p2p, dns: Vec::new(), earlier: HashSet::new() })
     }
 }
 

@@ -51,16 +51,24 @@ pub fn main () {
     let biadnet_connections = cmd.opt_arg_usize("biadnet-connections").unwrap_or(5);
     let bitcoin_connections = cmd.opt_arg_usize("bitcoin-connections").unwrap_or(5);
 
-    let biadnet_peers = get_socket_vec(cmd.opt_arg("biadnet-peers"), (MY_SERVER.to_string() + ":") + BIADNET_PORT.to_string().as_str());
-    let bitcoin_peers = get_socket_vec(cmd.opt_arg("bitcoin-peers"), (MY_SERVER.to_string() + ":") + BITCOIN_PORT.to_string().as_str());
+    let biadnet_peers = get_socket_vec(
+        Some(cmd.opt_arg("biadnet-peers").unwrap_or(
+            (MY_SERVER.to_string() + ":") + BIADNET_PORT.to_string().as_str()))).unwrap_or(Vec::new());
+    let bitcoin_peers = get_socket_vec(cmd.opt_arg("bitcoin-peers")).unwrap_or(Vec::new());
 
-    let biadnet_listen = get_socket_vec(cmd.opt_arg("biadnet-peers"), ("0.0.0.0".to_string() + ":") + BIADNET_PORT.to_string().as_str());
+    let biadnet_listen = get_socket_vec(
+        Some(cmd.opt_arg("biadnet-peers").unwrap_or (("0.0.0.0".to_string() + ":") + BIADNET_PORT.to_string().as_str())))
+        .unwrap_or(Vec::new());
 
     let db_name = cmd.opt_arg("db").unwrap_or("biadnet".to_string());
     let db_path = std::path::Path::new(db_name.as_str());
     let chaindb = Arc::new(RwLock::new(
-        ChainDB::new(&db_path, bitcoin_network, 0).expect("can not open chain db")));
-    let db = Arc::new(Mutex::new(DB::new(db_path).expect("can not open db")));
+        ChainDB::new(db_path, bitcoin_network, 0).expect("can not open chain db")));
+    let mut db = DB::new(db_path).expect("can not open db");
+    let mut tx = db.transaction();
+    tx.create_tables();
+    tx.commit();
+    let db = Arc::new(Mutex::new(db));
 
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
     BitcoinAdaptor::new(bitcoin_network, bitcoin_connections, bitcoin_peers, chaindb.clone(), db.clone()).start(&mut thread_pool);
@@ -68,8 +76,11 @@ pub fn main () {
     thread_pool.run::<Empty<(), Never>>(future::empty()).unwrap();
 }
 
-fn get_socket_vec(s: Option<String>, default: String) -> Vec<SocketAddr> {
-    s.unwrap_or(default).split(",").map(|s| SocketAddr::from_str(s).expect("invalid biadnet socket address")).collect::<Vec<_>>()
+fn get_socket_vec(s: Option<String>) -> Option<Vec<SocketAddr>> {
+    if let Some (ref s) = s {
+        return Some(s.split(",").map(|s| SocketAddr::from_str(s).expect("invalid biadnet socket address")).collect::<Vec<_>>())
+    }
+    None
 }
 
 struct CommandLine {
