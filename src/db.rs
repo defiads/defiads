@@ -14,6 +14,11 @@
 // limitations under the License.
 //
 
+use bitcoin::util::key::PublicKey;
+use bitcoin_hashes::{
+    sha256,
+    hex::{FromHex, ToHex}
+};
 use rusqlite::{Connection, Transaction, ToSql};
 use std::net::SocketAddr;
 use crate::error::BiadNetError;
@@ -23,6 +28,9 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
 use rand::{thread_rng, RngCore, Rng};
 use futures::{FutureExt, StreamExt};
+use crate::content::Content;
+use serde_cbor;
+use crate::ad::Ad;
 
 pub type SharedDB = Arc<Mutex<DB>>;
 
@@ -65,8 +73,32 @@ impl<'db> TX<'db> {
                 last_seen number,
                 banned number,
                 primary key(network, ip)
-            ) without rowid
+            ) without rowid;
+
+            create table if not exists ad (
+                id text primary key,
+                cat text,
+                abs text,
+                content blob
+            )
         "#).expect("failed to create db tables");
+    }
+
+    pub fn store_ad(&mut self, c: &Ad) -> Result<usize, BiadNetError> {
+        let id = c.digest();
+        let content = c.serialize();
+        Ok(self.tx.execute(r#"
+            insert or replace into ad (id, cat, abs, content) values (?1, ?2, ?3, ?4)
+        "#,
+        &[&id.to_hex() as &ToSql, &c.cat, &c.abs, &content]
+        )?)
+    }
+
+    pub fn delete_ad(&mut self, id: &sha256::Hash) -> Result<usize, BiadNetError> {
+        Ok(self.tx.execute(r#"
+            delete from ad where id = ?1
+        "#, &[&id.to_hex() as &ToSql]
+        )?)
     }
 
     pub fn store_address(&mut self, network: &str, address: &SocketAddr, mut last_seen: u64, mut banned: u64) -> Result<usize, BiadNetError>  {
@@ -131,6 +163,15 @@ mod test {
         {
             let mut tx = db.transaction();
             tx.delete_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap()).unwrap();
+            tx.commit();
+        }
+        {
+            let mut tx = db.transaction();
+            let ad = Ad::new("a".to_string(), "b".to_string(), "c");
+            let id = ad.digest();
+            tx.store_ad(&ad).unwrap();
+            tx.delete_ad(&id).unwrap();
+            tx.commit();
         }
     }
 }

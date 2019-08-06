@@ -25,10 +25,15 @@ use crate::bitcoin_hashes::{sha256, Hash};
 pub struct Ad {
     pub cat : String,
     pub abs: String,
-    pub content: Vec<KeyValue>
+    pub content: Text
 }
 
 impl Ad {
+    pub fn new(cat: String, abs: String, content: &str) -> Ad {
+        Ad{
+            cat, abs, content: Text::new(content)
+        }
+    }
     /// serialize an ad to a byte stream
     pub fn serialize(&self) -> Vec<u8> {
         serde_cbor::ser::to_vec_packed(&self).unwrap()
@@ -45,48 +50,6 @@ impl Ad {
     }
 }
 
-/// Key Value Pair
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
-pub struct KeyValue {
-    /// key
-    pub key: String,
-    /// value
-    pub value: Value
-}
-
-/// a number in the ad
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Number {
-    value: f32
-}
-
-impl Number {
-    /// create a new number
-    pub fn new(value: f32) -> Number {
-        Number{value}
-    }
-}
-
-impl Eq for Number {}
-
-impl PartialEq for Number {
-    fn eq(&self, other: &Number) -> bool {
-        self.value == other.value
-    }
-
-    fn ne(&self, other: &Number) -> bool {
-        self.value != other.value
-    }
-}
-
-/// A value
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
-pub enum Value {
-    Text(Text),
-    Number(Number),
-    Sub(Vec<KeyValue>)
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -95,28 +58,8 @@ mod test {
 
     #[test]
     fn test_ad_serialization () {
-        let ad = Ad { cat: "whatever".to_string(), abs: "this".to_string(),
-            content:
-                vec![
-                    KeyValue{key: "description".to_string(),
-                            value : Value::Text(Text::new("職認子相帯金領観年旅計読。東率歳本読谷車陸保美情僕代捕期負骨義著一"))},
-                    KeyValue{key: "tldr".to_string(),
-                        value : Value::Text(Text::new("Lorem ipsum dolor sit amet, ius te animal perpetua efficiantur"))},
-                    KeyValue{key: "price".to_string(),
-                        value : Value::Number(Number::new(1.0))},
-                    KeyValue {
-                        key: "sub".to_string(),
-                        value: Value::Sub(
-                            vec![
-                                KeyValue{
-                                    key: "option A".to_string(),
-                                    value: Value::Text(Text::new("blue"))},
-                                KeyValue{
-                                    key: "option B".to_string(),
-                                    value: Value::Text(Text::new("green"))},
-                            ])
-                    }
-                ]};
+        let ad = Ad { cat: "whatever".to_string(), abs: "loret ipsum".to_string(),
+            content: Text::new("職認子相帯金領観年旅計読。東率歳本読谷車陸保美情僕代捕期負骨義著一")};
 
         println!("Ad {:?}\nhas commitment {}", ad, hex::encode(&ad.digest()[..]));
         println!("Ad serialized to {}", hex::encode(ad.serialize()));
