@@ -92,9 +92,8 @@ pub struct Content {
 }
 
 impl Content {
-    /// length includes also the length of proof
     pub fn length(&self) -> u32 {
-        serde_cbor::ser::to_vec_packed(self).unwrap().len() as u32
+        self.ad.serialize().len() as u32
     }
 }
 
