@@ -79,18 +79,43 @@ impl<'db> TX<'db> {
                 id text primary key,
                 cat text,
                 abs text,
-                content blob
-            )
+                ad blob
+            ) without rowid;
+
+            create table if not exists content (
+                id text primary key,
+                proof blob,
+                publisher blob,
+                term number
+            ) without rowid;
         "#).expect("failed to create db tables");
+    }
+
+    pub fn store_content(&mut self, c: &Content) -> Result<usize, BiadNetError> {
+        self.store_ad(&c.ad)?;
+        let id = c.ad.digest();
+        let proof = serde_cbor::ser::to_vec_packed(&c.funding).unwrap();
+        let publisher = serde_cbor::ser::to_vec_packed(&c.funder).unwrap();
+        Ok(self.tx.execute(r#"
+            insert or replace into content (id, proof, publisher, term) values (?1, ?2, ?3, ?4)
+        "#, &[&id.to_hex() as &ToSql, &proof, &publisher, &c.term]
+        )?)
+    }
+
+    pub fn delete_content(&mut self, id: &sha256::Hash) -> Result<usize, BiadNetError> {
+        self.delete_ad(id)?;
+        Ok(self.tx.execute(r#"
+            delete from content where id = ?1
+        "#, &[&id.to_hex() as &ToSql]
+        )?)
     }
 
     pub fn store_ad(&mut self, c: &Ad) -> Result<usize, BiadNetError> {
         let id = c.digest();
         let content = c.serialize();
         Ok(self.tx.execute(r#"
-            insert or replace into ad (id, cat, abs, content) values (?1, ?2, ?3, ?4)
-        "#,
-        &[&id.to_hex() as &ToSql, &c.cat, &c.abs, &content]
+            insert or replace into ad (id, cat, abs, ad) values (?1, ?2, ?3, ?4)
+        "#, &[&id.to_hex() as &ToSql, &c.cat, &c.abs, &content]
         )?)
     }
 
@@ -148,6 +173,10 @@ impl<'db> TX<'db> {
 mod test {
     use super::*;
     use std::str::FromStr;
+    use bitcoin_wallet::proved::ProvedTransaction;
+    use bitcoin::blockdata::constants::genesis_block;
+    use bitcoin::network::constants::Network;
+
     #[test]
     pub fn test_db () {
         let mut db = DB::memory().unwrap();
@@ -171,6 +200,20 @@ mod test {
             let id = ad.digest();
             tx.store_ad(&ad).unwrap();
             tx.delete_ad(&id).unwrap();
+            tx.commit();
+        }
+        {
+            let mut tx = db.transaction();
+            let block = genesis_block(Network::Bitcoin);
+            let satoshi_key = PublicKey::from_slice(&block.txdata[0].output[0].script_pubkey [1..66]).unwrap();
+            let content = Content{
+                ad: Ad::new("a".to_string(), "b".to_string(), "c"),
+                funding: ProvedTransaction::new(&block, 0),
+                funder: satoshi_key,
+                term: 1
+            };
+            tx.store_content(&content).unwrap();
+            tx.delete_content(&content.ad.digest()).unwrap();
             tx.commit();
         }
     }
