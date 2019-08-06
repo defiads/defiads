@@ -19,6 +19,7 @@ use bitcoin_hashes::{
     sha256, sha256d,
     hex::{FromHex, ToHex}
 };
+use log::Level;
 use rusqlite::{Connection, Transaction, ToSql};
 use std::net::SocketAddr;
 use crate::error::BiadNetError;
@@ -99,6 +100,7 @@ impl<'db> TX<'db> {
         let proof = serde_cbor::ser::to_vec_packed(&c.funding).unwrap();
         let publisher = serde_cbor::ser::to_vec_packed(&c.funder).unwrap();
         let length = c.length();
+        debug!("store content {}", id);
         Ok(self.tx.execute(r#"
             insert or replace into content (id, cat, abs, ad, block_id, height, proof, publisher, term, weight, length)
             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
@@ -128,6 +130,7 @@ impl<'db> TX<'db> {
             }
         }
         for id in &to_delete {
+            debug!("drop content due to strorage limit {}", id);
             self.tx.execute(r#"
                 delete from content where id = ?1
                             "#, &[id as &ToSql])?;
@@ -144,6 +147,18 @@ impl<'db> TX<'db> {
         let n = self.tx.execute(r#"
             insert into temp.ids (id) select id from content where height + term <= ?1
         "#, &[&height as &ToSql])?;
+
+        if log_enabled!(Level::Debug) {
+            let mut statement = self.tx.prepare(r#"
+                select ip from temp.ids
+            "#)?;
+            for id in statement
+                .query_map(NO_PARAMS, |r| Ok(r.get_unwrap::<usize, String>(0)))? {
+                if let Ok(s) = id {
+                    debug!("drop expired content {}", s);
+                }
+            }
+        }
 
         self.tx.execute_batch(r#"
             delete from content where id in (select id from temp.ids);
@@ -162,6 +177,18 @@ impl<'db> TX<'db> {
         let n = self.tx.execute(r#"
             insert into temp.ids (id) select id from content where block_id = ?1
         "#, &[&block_id.to_hex() as &ToSql])?;
+
+        if log_enabled!(Level::Debug) {
+            let mut statement = self.tx.prepare(r#"
+                select ip from temp.ids
+            "#)?;
+            for id in statement
+                .query_map(NO_PARAMS, |r| Ok(r.get_unwrap::<usize, String>(0)))? {
+                if let Ok(s) = id {
+                    debug!("drop content due to chain re-org {}", s);
+                }
+            }
+        }
 
         self.tx.execute_batch(r#"
             delete from content where id in (select id from temp.ids);
