@@ -95,3 +95,9 @@ impl convert::From<std::net::AddrParseError> for BiadNetError {
         BiadNetError::IO(io::Error::from(io::ErrorKind::InvalidInput))
     }
 }
+
+impl convert::From<serde_cbor::error::Error> for BiadNetError {
+    fn from(_: serde_cbor::error::Error) -> BiadNetError {
+        BiadNetError::IO(io::Error::from(io::ErrorKind::InvalidInput))
+    }
+}

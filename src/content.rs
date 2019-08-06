@@ -31,6 +31,7 @@ use std::{
     hash::Hasher,
     fmt
 };
+use crate::error::BiadNetError;
 
 const DIGEST_LEN: usize = secp256k1::constants::MESSAGE_SIZE;
 
@@ -92,7 +93,7 @@ pub struct Content {
 
 impl Content {
     /// length includes also the length of proof
-    pub fn length(&self) -> Result<u32, Box<dyn error::Error>> {
+    pub fn length(&self) -> Result<u32, BiadNetError> {
         Ok(serde_cbor::ser::to_vec_packed(self)?.len() as u32)
     }
 }

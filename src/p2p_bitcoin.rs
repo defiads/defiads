@@ -108,8 +108,11 @@ impl P2PBitcoin {
 
         let timeout = Arc::new(Mutex::new(Timeout::new(p2p_control.clone())));
 
-        let downstream = Arc::new(Mutex::new(BitcoinDriver{store:
-        ContentStore::new(Arc::new(ChainDBTrunk{chaindb: self.chaindb.clone()}))}));
+        let store = ContentStore::new(
+            self.db.clone(),
+            Arc::new(ChainDBTrunk{chaindb: self.chaindb.clone()}));
+
+        let downstream = Arc::new(Mutex::new(BitcoinDriver{store}));
 
         dispatcher.add_listener(AddressPoolMaintainer::new(p2p_control.clone(), self.db.clone()));
         dispatcher.add_listener(HeaderDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout.clone(), downstream));

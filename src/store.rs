@@ -28,6 +28,7 @@ use std::sync::Arc;
 use crate::error::BiadNetError;
 use crate::content::Content;
 use crate::funding::funding_script;
+use crate::db::SharedDB;
 
 
 const STORAGE_LIMIT: u64 = 2^30; // 1 GiB
@@ -46,17 +47,19 @@ pub struct ContentStore {
     ctx: Secp256k1<All>,
     trans_store: Vec<MemStoredContent>,
     proofs: HashMap<sha256d::Hash, ProvedTransaction>,
-    trunk: Arc<dyn Trunk + Send + Sync>
+    trunk: Arc<dyn Trunk + Send + Sync>,
+    db: SharedDB
 }
 
 impl ContentStore {
     /// new content store
-    pub fn new(trunk: Arc<dyn Trunk + Send + Sync>) -> ContentStore {
+    pub fn new(db: SharedDB, trunk: Arc<dyn Trunk + Send + Sync>) -> ContentStore {
         ContentStore {
             ctx: Secp256k1::new(),
             trans_store: Vec::new(),
             proofs: HashMap::new(),
-            trunk
+            trunk,
+            db
         }
     }
 
@@ -84,22 +87,26 @@ impl ContentStore {
 
         // remove those points and associated content
         for id in lost_content {
-            self.remove_content(&id);
+            self.remove_content(&id)?;
         }
         return Ok(())
     }
 
     /// remove a content from store
-    fn remove_content(&mut self, digest: &sha256::Hash) {
+    fn remove_content(&mut self, digest: &sha256::Hash) -> Result<(), BiadNetError> {
         if let Some(pos) = self.trans_store.iter().rposition(|s| s.digest == *digest) {
             self.trans_store.remove(pos);
         }
-        // TODO persistent store
+        let mut db = self.db.lock().unwrap();
+        let mut tx = db.transaction();
+        tx.delete_content(digest)?;
+        tx.commit();
         info!("remove content {}", digest.to_hex());
+        Ok(())
     }
 
     /// add content
-    pub fn add_content(&mut self, content: &Content) -> Result<bool, Box<error::Error>> {
+    pub fn add_content(&mut self, content: &Content) -> Result<bool, BiadNetError> {
         if let Some(height) = self.trunk.get_height(content.funding.get_block_hash()) {
             if let Some(header) = self.trunk.get_header(content.funding.get_block_hash()) {
                 if header.merkle_root == content.funding.merkle_root() {
@@ -109,8 +116,13 @@ impl ContentStore {
                         let commitment = funding_script(&content.funder, &digest, content.term, &self.ctx);
                         if let Some((vout, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
                             info!("add content {}", &digest);
+                            {
+                                let mut db = self.db.lock().unwrap();
+                                let mut tx = db.transaction();
+                                tx.store_content(content)?;
+                                tx.commit();
+                            }
                             return Ok(self.add_to_trans_store(content, o.value, OutPoint { txid: t.txid(), vout: vout as u32 })?)
-                            // TODO persistent store
                         }
                     }
                 }
@@ -119,7 +131,7 @@ impl ContentStore {
         Ok(false)
     }
 
-    fn add_to_trans_store (&mut self, content: &Content, value: u64, point: OutPoint) -> Result<bool, Box<error::Error>> {
+    fn add_to_trans_store (&mut self, content: &Content, value: u64, point: OutPoint) -> Result<bool, BiadNetError> {
         let length = content.length()? as u64;
         let weight = length / value;
         let stored_at;
@@ -143,7 +155,7 @@ impl ContentStore {
         }
         let removed = self.trans_store.iter().skip(cut).map(|s| s.digest).collect::<Vec<_>>();
         for d in &removed {
-            self.remove_content(d);
+            self.remove_content(d)?;
         }
         return Ok(cut < stored_at);
     }
