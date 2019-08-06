@@ -22,7 +22,7 @@ use byteorder::{LittleEndian, WriteBytesExt, ReadBytesExt};
 
 /// A text object that stores a string in space saving encoding
 /// currently UTF-8 or UTF-16 with or without snappy compression
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 pub struct Text {
     encoded: Vec<u8>
 }

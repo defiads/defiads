@@ -65,6 +65,7 @@ use crate::updater::Updater;
 use murmel::p2p::Version;
 use serde_cbor::{Deserializer, StreamDeserializer};
 use crate::db::SharedDB;
+use crate::store::SharedContentStore;
 
 const MAGIC: u32 = 0xB1AD;
 const MAX_PROTOCOL_VERSION: u32 = 1;
@@ -191,12 +192,13 @@ pub struct P2PBiadNet {
     peers: Vec<SocketAddr>,
     listen: Vec<SocketAddr>,
     chaindb: SharedChainDB,
-    db: SharedDB
+    db: SharedDB,
+    content_store: SharedContentStore
 }
 
 impl P2PBiadNet {
-    pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>, chaindb: SharedChainDB, db: SharedDB) -> P2PBiadNet {
-        P2PBiadNet {connections, peers, listen, chaindb, db}
+    pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>, chaindb: SharedChainDB, db: SharedDB, content_store: SharedContentStore) -> P2PBiadNet {
+        P2PBiadNet {connections, peers, listen, chaindb, db, content_store}
     }
     pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);

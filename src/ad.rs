@@ -21,7 +21,7 @@ use crate::text::Text;
 use crate::bitcoin_hashes::{sha256, Hash};
 
 /// An ad, the payload of distributed content
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 pub struct Ad {
     pub cat : String,
     pub abs: String,

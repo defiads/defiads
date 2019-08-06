@@ -93,8 +93,8 @@ pub struct Content {
 
 impl Content {
     /// length includes also the length of proof
-    pub fn length(&self) -> Result<u32, BiadNetError> {
-        Ok(serde_cbor::ser::to_vec_packed(self)?.len() as u32)
+    pub fn length(&self) -> u32 {
+        serde_cbor::ser::to_vec_packed(self).unwrap().len() as u32
     }
 }
 

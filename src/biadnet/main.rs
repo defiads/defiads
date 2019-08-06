@@ -27,9 +27,10 @@ use futures::{
 };
 
 use bitcoin::network::constants::Network;
-use biadne::p2p_bitcoin::P2PBitcoin;
+use biadne::p2p_bitcoin::{ChainDBTrunk, P2PBitcoin};
 use biadne::p2p_biadnet::P2PBiadNet;
 use biadne::db::DB;
+use biadne::store::ContentStore;
 use futures::future::Empty;
 use murmel::chaindb::ChainDB;
 
@@ -42,6 +43,7 @@ use std::sync::{Arc,RwLock, Mutex};
 const MY_SERVER: &str = "87.230.22.85";
 const BIADNET_PORT: u16 = 8444;
 const BITCOIN_PORT: u16 = 8333;
+const STORAGE_LIMIT: u64 = 2^20;
 
 pub fn main () {
     let cmd = CommandLine::new();
@@ -70,15 +72,23 @@ pub fn main () {
     chaindb.init(false).expect("can not initialize db");
     let chaindb = Arc::new(RwLock::new(chaindb));
 
+    let storage_limit = cmd.opt_arg_usize("storage-limit-gib").unwrap_or(STORAGE_LIMIT as usize) as u64;
+
     let mut db = DB::new(db_path).expect("can not open db");
     let mut tx = db.transaction();
     tx.create_tables();
     tx.commit();
     let db = Arc::new(Mutex::new(db));
 
+    let content_store =
+        Arc::new(RwLock::new(ContentStore::new(db.clone(), storage_limit,
+                                               Arc::new(ChainDBTrunk{chaindb: chaindb.clone()}))));
+
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
-    P2PBitcoin::new(bitcoin_network, bitcoin_connections, bitcoin_peers, chaindb.clone(), db.clone()).start(&mut thread_pool);
-    P2PBiadNet::new(biadnet_connections, biadnet_peers, biadnet_listen, chaindb.clone(), db.clone()).start(&mut thread_pool);
+    P2PBitcoin::new(bitcoin_network, bitcoin_connections, bitcoin_peers, chaindb.clone(), db.clone(),
+                    content_store.clone()).start(&mut thread_pool);
+    P2PBiadNet::new(biadnet_connections, biadnet_peers, biadnet_listen, chaindb.clone(), db.clone(),
+                    content_store.clone()).start(&mut thread_pool);
     thread_pool.run::<Empty<(), Never>>(future::empty()).unwrap();
 }
 

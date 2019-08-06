@@ -63,6 +63,7 @@ use crate::error::BiadNetError;
 use crate::store::ContentStore;
 use crate::db::SharedDB;
 use futures::executor::ThreadPool;
+use crate::store::SharedContentStore;
 
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
@@ -72,12 +73,13 @@ pub struct P2PBitcoin {
     peers: Vec<SocketAddr>,
     chaindb: SharedChainDB,
     network: Network,
-    db: SharedDB
+    db: SharedDB,
+    content_store: SharedContentStore
 }
 
 impl P2PBitcoin {
-    pub fn new (network: Network, connections: usize, peers: Vec<SocketAddr>, chaindb: SharedChainDB, db: SharedDB) -> P2PBitcoin {
-        P2PBitcoin {connections, peers, chaindb, network, db}
+    pub fn new (network: Network, connections: usize, peers: Vec<SocketAddr>, chaindb: SharedChainDB, db: SharedDB, content_store: SharedContentStore) -> P2PBitcoin {
+        P2PBitcoin {connections, peers, chaindb, network, db, content_store}
     }
     pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
@@ -108,11 +110,7 @@ impl P2PBitcoin {
 
         let timeout = Arc::new(Mutex::new(Timeout::new(p2p_control.clone())));
 
-        let store = ContentStore::new(
-            self.db.clone(),
-            Arc::new(ChainDBTrunk{chaindb: self.chaindb.clone()}));
-
-        let downstream = Arc::new(Mutex::new(BitcoinDriver{store}));
+        let downstream = Arc::new(Mutex::new(BitcoinDriver{store: self.content_store.clone()}));
 
         dispatcher.add_listener(AddressPoolMaintainer::new(p2p_control.clone(), self.db.clone()));
         dispatcher.add_listener(HeaderDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout.clone(), downstream));
@@ -294,18 +292,18 @@ impl AddressPoolMaintainer {
 }
 
 struct BitcoinDriver {
-    store: ContentStore
+    store: SharedContentStore
 }
 
 impl Downstream for BitcoinDriver {
     fn block_connected(&mut self, block: &Block, height: u32) {}
 
     fn header_connected(&mut self, block: &BlockHeader, height: u32) {
-        self.store.add_header(block).expect("can not add header");
+        self.store.write().unwrap().add_header(height, block).expect("can not add header");
     }
 
     fn block_disconnected(&mut self, header: &BlockHeader) {
-        self.store.unwind_tip(header).expect("can not unwind tip");
+        self.store.write().unwrap().unwind_tip(header).expect("can not unwind tip");
     }
 }
 
