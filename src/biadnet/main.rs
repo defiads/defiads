@@ -60,13 +60,16 @@ pub fn main () {
     let bitcoin_peers = get_socket_vec(cmd.opt_arg("bitcoin-peers")).unwrap_or(Vec::new());
 
     let biadnet_listen = get_socket_vec(
-        Some(cmd.opt_arg("biadnet-peers").unwrap_or (("0.0.0.0".to_string() + ":") + BIADNET_PORT.to_string().as_str())))
+        Some(cmd.opt_arg("listen").unwrap_or (("0.0.0.0".to_string() + ":") + BIADNET_PORT.to_string().as_str())))
         .unwrap_or(Vec::new());
 
-    let db_name = cmd.opt_arg("db").unwrap_or("biadnet".to_string());
+    let db_name = cmd.opt_arg("db").unwrap_or("biad.db".to_string());
     let db_path = std::path::Path::new(db_name.as_str());
-    let chaindb = Arc::new(RwLock::new(
-        ChainDB::new(db_path, bitcoin_network, 0).expect("can not open chain db")));
+
+    let mut chaindb = ChainDB::new(db_path, bitcoin_network, 0).expect("can not open chain db");
+    chaindb.init(false).expect("can not initialize db");
+    let chaindb = Arc::new(RwLock::new(chaindb));
+
     let mut db = DB::new(db_path).expect("can not open db");
     let mut tx = db.transaction();
     tx.create_tables();
@@ -81,7 +84,7 @@ pub fn main () {
 
 fn get_socket_vec(s: Option<String>) -> Option<Vec<SocketAddr>> {
     if let Some (ref s) = s {
-        return Some(s.split(",").map(|s| SocketAddr::from_str(s).expect("invalid biadnet socket address")).collect::<Vec<_>>())
+        return Some(s.split(",").map(|s| SocketAddr::from_str(s).expect("invalid socket address")).collect::<Vec<_>>())
     }
     None
 }

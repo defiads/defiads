@@ -84,8 +84,6 @@ impl P2PBitcoin {
 
         let mut dispatcher = Dispatcher::new(receiver);
 
-        self.chaindb.write().unwrap().init(false).expect("can not initialize db");
-
         let height =
             if let Some(tip) = self.chaindb.read().unwrap().header_tip() {
                 AtomicUsize::new(tip.stored.height as usize)
