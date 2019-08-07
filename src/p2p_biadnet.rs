@@ -93,7 +93,7 @@ impl P2PConfig<Message, Envelope> for BiadnetP2PConfig {
         Message::Version(
             VersionMessage {
                 version: std::cmp::min(MAX_PROTOCOL_VERSION, max_protocol_version),
-                nonce: thread_rng().next_u64(),
+                nonce: self.nonce,
                 timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
                 start_height: 0, // TODO
                 user_agent: "biadnet 0.1.0".to_string(),
