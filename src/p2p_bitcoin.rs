@@ -153,7 +153,7 @@ impl P2PBitcoin {
                             self.connections.push(self.p2p.add_peer("bitcoin", PeerSource::Outgoing(addr)));
                         }
                         else {
-                            error!("no more peers to connect");
+                            error!("no more bitcoin peers to connect");
                             return Ok(Async::Pending);
                         }
                     }
@@ -183,7 +183,7 @@ impl P2PBitcoin {
 
         impl KeepConnected {
             fn get_an_address(&mut self) -> Option<SocketAddr> {
-                if let Ok(Some(a)) = self.db.lock().unwrap().transaction().get_an_address(&self.earlier) {
+                if let Ok(Some(a)) = self.db.lock().unwrap().transaction().get_an_address("bitcoin", &self.earlier) {
                     self.earlier.insert(a);
                     return Some(a);
                 }

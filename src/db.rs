@@ -218,14 +218,15 @@ impl<'db> TX<'db> {
 
     // get an address not banned during the last day
     // the probability to be selected is exponentially higher for those with higher last_seen time
-    pub fn get_an_address(&self, other_than: &HashSet<SocketAddr>) -> Result<Option<SocketAddr>, BiadNetError> {
+    pub fn get_an_address(&self, network: &str, other_than: &HashSet<SocketAddr>) -> Result<Option<SocketAddr>, BiadNetError> {
         const BAN_TIME: u64 = 60*60*24; // a day
 
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
         let mut statement = self.tx.prepare(r#"
-            select ip from address where banned < :banned order by last_seen desc
+            select ip from address where network = :network and banned < :banned order by last_seen desc
         "#)?;
-        let eligible = statement.query_map_named::<String, _>(&[(":banned", &((now - BAN_TIME) as i64))],
+        let eligible = statement.query_map_named::<String, _>(
+            &[(":banned", &((now - BAN_TIME) as i64)), ("network", &network.to_string())],
                                                  |row| row.get(0))?
             .filter_map(|r| match r { Ok(ref s) => Some(s.clone()), _ => None})
             .filter(move |s| !other_than.contains(&SocketAddr::from_str(s).expect("address stored in db should be parsable")))
@@ -257,8 +258,8 @@ mod test {
             tx.create_tables();
             tx.store_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap(), 0, 0).unwrap();
             tx.store_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap(), 1, 1).unwrap();
-            tx.get_an_address(&HashSet::new()).unwrap();
-            assert!(tx.get_an_address(&vec!(SocketAddr::from_str("127.0.0.1:8444").unwrap()).iter().cloned().collect::<HashSet<SocketAddr>>()).unwrap().is_none());
+            tx.get_an_address("biadnet", &HashSet::new()).unwrap();
+            assert!(tx.get_an_address("biadnet", &vec!(SocketAddr::from_str("127.0.0.1:8444").unwrap()).iter().cloned().collect::<HashSet<SocketAddr>>()).unwrap().is_none());
             tx.commit();
         }
         {

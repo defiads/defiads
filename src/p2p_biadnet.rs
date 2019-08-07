@@ -261,7 +261,7 @@ impl P2PBiadNet {
                             self.connections.push(self.p2p.add_peer("biadnet", PeerSource::Outgoing(addr)));
                         }
                         else {
-                            error!("no more peers to connect");
+                            error!("no more biadnet peers to connect");
                             return Ok(Async::Pending);
                         }
                     }
@@ -291,7 +291,7 @@ impl P2PBiadNet {
 
         impl KeepConnected {
             fn get_an_address(&mut self) -> Option<SocketAddr> {
-                if let Ok(Some(a)) = self.db.lock().unwrap().transaction().get_an_address(&self.earlier) {
+                if let Ok(Some(a)) = self.db.lock().unwrap().transaction().get_an_address("biadnet", &self.earlier) {
                     self.earlier.insert(a);
                     return Some(a);
                 }
