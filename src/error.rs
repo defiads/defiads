@@ -101,3 +101,9 @@ impl convert::From<serde_cbor::error::Error> for BiadNetError {
         BiadNetError::IO(io::Error::from(io::ErrorKind::InvalidInput))
     }
 }
+
+impl convert::From<bitcoin_hashes::Error> for BiadNetError {
+    fn from(_: bitcoin_hashes::Error) -> BiadNetError {
+        BiadNetError::IO(io::Error::from(io::ErrorKind::InvalidInput))
+    }
+}

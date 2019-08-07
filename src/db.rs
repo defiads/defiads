@@ -15,8 +15,8 @@
 //
 
 use bitcoin_hashes::{
-    sha256d,
-    hex::ToHex
+    sha256d, sha256,
+    hex::{FromHex, ToHex}
 };
 use log::Level;
 use rusqlite::{Connection, Transaction, ToSql};
@@ -30,6 +30,10 @@ use rand::{thread_rng, Rng};
 use crate::content::Content;
 use serde_cbor;
 use rusqlite::NO_PARAMS;
+use crate::iblt::IBLT;
+use crate::content::ContentKey;
+use std::io::Cursor;
+use crate::iblt::IBLTKey;
 
 pub type SharedDB = Arc<Mutex<DB>>;
 
@@ -88,7 +92,28 @@ impl<'db> TX<'db> {
                 length number
             ) without rowid;
 
+            create table if not exists iblt (
+                length number primary key,
+                filter blob
+            ) without rowid;
+
         "#).expect("failed to create db tables");
+    }
+
+    pub fn store_iblt(&mut self, iblt: &IBLT<ContentKey>) -> Result<usize, BiadNetError> {
+        let ser = serde_cbor::ser::to_vec_packed(&iblt)?;
+        Ok(self.tx.execute(r#"
+            insert or replace into iblt (length, filter)
+            values (?1, ?2)
+        "#, &[&(iblt.len() as u32) as &ToSql, &ser])?)
+    }
+
+    pub fn read_iblt(&mut self, len: usize) -> Result<IBLT<ContentKey>, BiadNetError> {
+        Ok(self.tx.query_row(r#"
+            select filter from iblt where length = ?1
+        "#, &[&(len as u32) as &ToSql], |r|
+            Ok(serde_cbor::from_reader(Cursor::new(r.get_unwrap::<usize, Vec<u8>>(0)))
+                .expect("corrupted iblt in db")))?)
     }
 
     pub fn store_content(&mut self, height: u32, block_id: &sha256d::Hash, c: &Content, amount: u64) -> Result<usize, BiadNetError> {
@@ -108,9 +133,9 @@ impl<'db> TX<'db> {
         )?)
     }
 
-    pub fn truncate_content(&mut self, limit: u64) -> Result<(), BiadNetError> {
+    pub fn truncate_content(&mut self, limit: u64) -> Result<Vec<ContentKey>, BiadNetError> {
         let mut statement = self.tx.prepare(r#"
-            select id, length from content order by weight desc
+            select id, length, weight from content order by weight desc
         "#)?;
 
         let mut to_delete = Vec::new();
@@ -118,24 +143,28 @@ impl<'db> TX<'db> {
         for result in statement.query_map(NO_PARAMS,
                                                 |r|
                                                     Ok((r.get_unwrap::<usize, String>(0),
-                                                        r.get_unwrap::<usize, i64>(1))))? {
-            if let Ok((id, length)) = result {
+                                                        r.get_unwrap::<usize, i64>(1),
+                                                        r.get_unwrap::<usize, u32>(2))))? {
+            if let Ok((id, length, weight)) = result {
                 size += length as u64;
                 if size > limit {
-                    to_delete.push(id);
+                    to_delete.push((id, weight));
                 }
             }
         }
-        for id in &to_delete {
+        let mut keys = Vec::new();
+        for (id, weight) in &to_delete {
+            keys.push(ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..], *weight));
             debug!("drop content due to strorage limit {}", id);
             self.tx.execute(r#"
                 delete from content where id = ?1
                             "#, &[id as &ToSql])?;
         }
-        Ok(())
+        Ok(keys)
     }
 
-    pub fn delete_expired(&mut self, height: u32) -> Result<usize, BiadNetError> {
+    pub fn delete_expired(&mut self, height: u32) -> Result<Vec<ContentKey>, BiadNetError> {
+        let mut keys = Vec::new();
         self.tx.execute(r#"
             create temp table ids (
                 id text
@@ -144,6 +173,17 @@ impl<'db> TX<'db> {
         let n = self.tx.execute(r#"
             insert into temp.ids (id) select id from content where height + term <= ?1
         "#, &[&height as &ToSql])?;
+
+        let mut query = self.tx.prepare(r#"
+            select id, weight from content where id in (select id from temp.ids)
+        "#)?;
+
+        for r in query.query_map::<(String, u32),&[&ToSql],_>(NO_PARAMS,
+                                                               |r| Ok((r.get(0)?,r.get(1)?)))? {
+            if let Ok((id, weight)) = r {
+                keys.push(ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..], weight));
+            }
+        }
 
         if log_enabled!(Level::Debug) {
             let mut statement = self.tx.prepare(r#"
@@ -162,10 +202,11 @@ impl<'db> TX<'db> {
             drop table temp.ids;
         "#)?;
 
-        Ok(n)
+        Ok(keys)
     }
 
-    pub fn delete_confirmed(&mut self, block_id: &sha256d::Hash) -> Result<usize, BiadNetError> {
+    pub fn delete_confirmed(&mut self, block_id: &sha256d::Hash) -> Result<Vec<ContentKey>, BiadNetError> {
+        let mut keys = Vec::new();
         self.tx.execute(r#"
             create temp table ids (
                 id text
@@ -174,6 +215,24 @@ impl<'db> TX<'db> {
         let n = self.tx.execute(r#"
             insert into temp.ids (id) select id from content where block_id = ?1
         "#, &[&block_id.to_hex() as &ToSql])?;
+
+        let mut query = self.tx.prepare(r#"
+            select id, weight from content where id in (select id from temp.ids)
+        "#)?;
+
+        for r in query.query_map::<(String, u32),&[&ToSql],_>(NO_PARAMS,
+                                                              |r| Ok((r.get(0)?,r.get(1)?)))? {
+            if let Ok((id, weight)) = r {
+                keys.push(ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..], weight));
+            }
+        }
+
+        for r in query.query_map::<(String, u32),&[&ToSql],_>(NO_PARAMS,
+                                                              |r| Ok((r.get(0)?,r.get(1)?)))? {
+            if let Ok((id, weight)) = r {
+                keys.push(ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..], weight));
+            }
+        }
 
         if log_enabled!(Level::Debug) {
             let mut statement = self.tx.prepare(r#"
@@ -192,7 +251,7 @@ impl<'db> TX<'db> {
             drop table temp.ids;
         "#)?;
 
-        Ok(n)
+        Ok(keys)
     }
 
     pub fn store_address(&mut self, network: &str, address: &SocketAddr, mut last_seen: u64, mut banned: u64) -> Result<usize, BiadNetError>  {

@@ -77,6 +77,10 @@ impl<K : IBLTKey> IBLT<K> {
             ksequence: generate_ksequence(k, k0, k1)}
     }
 
+    pub fn len(&self) -> usize {
+        self.buckets.len()
+    }
+
     fn keyhash(&self, key: &K) -> u64 {
         key.hash_to_u64_with_keys(self.k0, self.k1)
     }

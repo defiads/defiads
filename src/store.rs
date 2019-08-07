@@ -25,26 +25,50 @@ use crate::error::BiadNetError;
 use crate::content::Content;
 use crate::funding::funding_script;
 use crate::db::SharedDB;
+use crate::iblt::IBLT;
+use crate::content::ContentKey;
+use rand::{RngCore, thread_rng};
 
 pub type SharedContentStore = Arc<RwLock<ContentStore>>;
+
+// random, I swear
+const K0:u64 = 1614418600579272000;
+const K1:u64 = 8727507265883984962;
+// number of hash functions
+const NH:usize = 4;
 
 /// the distributed content torage
 pub struct ContentStore {
     ctx: Secp256k1<All>,
     trunk: Arc<dyn Trunk + Send + Sync>,
     db: SharedDB,
-    storage_limit: u64
+    storage_limit: u64,
+    iblts: Vec<IBLT<ContentKey>>
 }
 
 impl ContentStore {
     /// new content store
-    pub fn new(db: SharedDB, storage_limit: u64, trunk: Arc<dyn Trunk + Send + Sync>) -> ContentStore {
-        ContentStore {
+    pub fn new(db: SharedDB, storage_limit: u64, trunk: Arc<dyn Trunk + Send + Sync>) -> Result<ContentStore, BiadNetError> {
+        let mut iblts = Vec::new();
+        {
+            let mut db = db.lock().unwrap();
+            let mut tx = db.transaction();
+            let smallest = 100usize;
+            for pow in 0..7 {
+                let size = smallest * 4 ^ pow;
+                iblts.push(
+                    tx.read_iblt(size).unwrap_or(
+                        IBLT::new(size, NH, K0, K1))
+                )
+            }
+        }
+        Ok(ContentStore {
             ctx: Secp256k1::new(),
             trunk,
             db,
-            storage_limit
-        }
+            storage_limit,
+            iblts
+        })
     }
 
     /// add a header to the tip of the chain
@@ -52,7 +76,11 @@ impl ContentStore {
         info!("new chain tip {}", header.bitcoin_hash());
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
-        tx.delete_expired(height)?;
+        for key in &mut tx.delete_expired(height)? {
+            for i in &mut self.iblts {
+                i.delete(key);
+            }
+        }
         tx.commit();
         Ok(())
     }
@@ -62,7 +90,11 @@ impl ContentStore {
         info!("unwind tip {}", header.bitcoin_hash());
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
-        tx.delete_confirmed(&header.bitcoin_hash())?;
+        for key in &mut tx.delete_confirmed(&header.bitcoin_hash())? {
+            for i in &mut self.iblts {
+                i.delete(key);
+            }
+        }
         tx.commit();
         return Ok(())
     }
@@ -70,7 +102,11 @@ impl ContentStore {
     pub fn truncate_to_limit(&mut self) -> Result<(), BiadNetError> {
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
-        tx.truncate_content(self.storage_limit)?;
+        for key in &mut tx.truncate_content(self.storage_limit)? {
+            for i in &mut self.iblts {
+                i.delete(key);
+            }
+        }
         tx.commit();
         return Ok(())
     }
@@ -94,10 +130,17 @@ impl ContentStore {
                             if let Some((_, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
                                 // ok there is a commitment to this ad
                                 info!("add content {}", &digest);
+                                let weight = (content.length() as u64/o.value) as u32;
+                                for i in &mut self.iblts {
+                                    i.insert(&ContentKey::new(&digest[..], weight));
+                                }
                                 {
                                     let mut db = self.db.lock().unwrap();
                                     let mut tx = db.transaction();
                                     tx.store_content(height, &header.bitcoin_hash(),content, o.value)?;
+                                    for i in &self.iblts {
+                                        tx.store_iblt(i)?;
+                                    }
                                     tx.commit();
                                 }
                                 return Ok(true)
