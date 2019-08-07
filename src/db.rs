@@ -14,10 +14,9 @@
 // limitations under the License.
 //
 
-use bitcoin::util::key::PublicKey;
 use bitcoin_hashes::{
-    sha256, sha256d,
-    hex::{FromHex, ToHex}
+    sha256d,
+    hex::ToHex
 };
 use log::Level;
 use rusqlite::{Connection, Transaction, ToSql};
@@ -27,11 +26,9 @@ use std::time::SystemTime;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
-use rand::{thread_rng, RngCore, Rng};
-use futures::{FutureExt, StreamExt};
+use rand::{thread_rng, Rng};
 use crate::content::Content;
 use serde_cbor;
-use crate::ad::Ad;
 use rusqlite::NO_PARAMS;
 
 pub type SharedDB = Arc<Mutex<DB>>;
@@ -249,7 +246,8 @@ mod test {
     use bitcoin_wallet::proved::ProvedTransaction;
     use bitcoin::blockdata::constants::genesis_block;
     use bitcoin::network::constants::Network;
-    use bitcoin_hashes::sha256;
+    use bitcoin::util::key::PublicKey;
+    use crate::ad::Ad;
 
     #[test]
     pub fn test_db () {
@@ -281,7 +279,6 @@ mod test {
                 term: 1
             };
             tx.store_content(0, &block.bitcoin_hash(), &content, 5000000000).unwrap();
-            let genesis_tx = block.txdata[0].txid();
             tx.delete_confirmed(&block.bitcoin_hash()).unwrap();
             tx.delete_expired(1).unwrap();
             tx.truncate_content(1024).unwrap();

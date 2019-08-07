@@ -15,7 +15,6 @@
 //
 
 use murmel::p2p::{PeerMessageSender, P2PControlSender, PeerMessageReceiver, PeerMessage};
-use murmel::downstream::SharedDownstream;
 use murmel::timeout::SharedTimeout;
 
 use crate::messages::Message;
@@ -44,11 +43,11 @@ impl Updater {
         loop {
             while let Ok(msg) = receiver.recv_timeout(Duration::from_millis(1000)) {
                 match msg {
-                    PeerMessage::Connected(pid) => {
+                    PeerMessage::Connected(_) => {
                     }
                     PeerMessage::Disconnected(_,_) => {
                     }
-                    PeerMessage::Message(pid, msg) => {
+                    PeerMessage::Message(_, msg) => {
                         match msg {
                             _ => {  }
                         }

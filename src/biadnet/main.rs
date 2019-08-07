@@ -21,9 +21,8 @@ use log::Level;
 use std::env::args;
 
 use futures::{
-    future,
-    Async, Future, Never,
-    executor::{Executor, ThreadPoolBuilder}
+    future, Never,
+    executor::ThreadPoolBuilder
 };
 
 use bitcoin::network::constants::Network;

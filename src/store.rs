@@ -16,13 +16,9 @@
 
 //! store
 
-use bitcoin::{OutPoint, BlockHeader, BitcoinHash};
-use bitcoin_hashes::{sha256d, sha256, hex::ToHex};
-use bitcoin_wallet::{proved::ProvedTransaction};
+use bitcoin::{BlockHeader, BitcoinHash};
 use secp256k1::{Secp256k1, All};
 use bitcoin_wallet::trunk::Trunk;
-use std::collections::HashMap;
-use std::error;
 use std::sync::{RwLock, Arc};
 
 use crate::error::BiadNetError;
@@ -64,7 +60,6 @@ impl ContentStore {
     /// unwind the tip
     pub fn unwind_tip(&mut self, header: &BlockHeader) -> Result<(), BiadNetError> {
         info!("unwind tip {}", header.bitcoin_hash());
-        let header_hash = header.bitcoin_hash();
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         tx.delete_confirmed(&header.bitcoin_hash())?;
@@ -96,7 +91,7 @@ impl ContentStore {
                             let digest = content.ad.digest();
                             // expected commitment script to this ad
                             let commitment = funding_script(&content.funder, &digest, content.term, &self.ctx);
-                            if let Some((vout, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
+                            if let Some((_, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
                                 // ok there is a commitment to this ad
                                 info!("add content {}", &digest);
                                 {

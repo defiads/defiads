@@ -15,12 +15,11 @@
 //
 
 use std::{
-    collections::{HashMap, HashSet},
-    net::{IpAddr, SocketAddr, SocketAddrV4},
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH, Duration},
+    collections::HashSet,
+    net::SocketAddr,
+    time::SystemTime,
     thread,
-    sync::{Arc, Mutex, RwLock, mpsc, atomic::AtomicUsize}
+    sync::{Arc, Mutex, mpsc, atomic::AtomicUsize}
 };
 use bitcoin::{
     Block, BlockHeader,
@@ -35,15 +34,12 @@ use bitcoin::{
 use bitcoin_hashes::sha256d;
 use bitcoin_wallet::trunk::Trunk;
 use future::Future;
-use futures::{future, Never, Async, Poll, task,
-              executor::{Executor, ThreadPoolBuilder}
-};
+use futures::{future, Never, Async, Poll, task, executor::Executor};
 
-use log::Level;
 use murmel::{
     dispatcher::Dispatcher,
     p2p::P2P,
-    chaindb::{ChainDB, SharedChainDB},
+    chaindb::SharedChainDB,
     dns::dns_seed,
     downstream::Downstream,
     error::MurmelError,
@@ -51,16 +47,12 @@ use murmel::{
     ping::Ping,
     p2p::{
         PeerMessageSender, PeerSource, P2PControlSender, PeerMessage, PeerMessageReceiver,
-        BitcoinP2PConfig,
-        P2PControl, PeerId
+        BitcoinP2PConfig
     },
-    timeout::{SharedTimeout, Timeout, ExpectedReply}
+    timeout::Timeout
 };
 use rand::{RngCore, thread_rng};
-use simple_logger::init_with_level;
 
-use crate::error::BiadNetError;
-use crate::store::ContentStore;
 use crate::db::SharedDB;
 use futures::executor::ThreadPool;
 use crate::store::SharedContentStore;
@@ -210,19 +202,6 @@ impl P2PBitcoin {
                 }
                 None
             }
-
-            fn dns_lookup(&mut self) {
-                while self.connections.len() < self.min_connections {
-                    if self.dns.len() == 0 {
-                        self.dns = dns_seed(self.network);
-                    }
-                    if self.dns.len() > 0 {
-                        let mut rng = thread_rng();
-                        let addr = self.dns[(rng.next_u64() as usize) % self.dns.len()];
-                        self.connections.push(self.p2p.add_peer("bitcoin", PeerSource::Outgoing(addr)));
-                    }
-                }
-            }
         }
     }
 }
@@ -285,7 +264,6 @@ impl AddressPoolMaintainer {
                         _ => { }
                     }
                 }
-                _ => {}
             }
         }
     }
@@ -296,7 +274,7 @@ struct BitcoinDriver {
 }
 
 impl Downstream for BitcoinDriver {
-    fn block_connected(&mut self, block: &Block, height: u32) {}
+    fn block_connected(&mut self, _block: &Block, _height: u32) {}
 
     fn header_connected(&mut self, block: &BlockHeader, height: u32) {
         self.store.write().unwrap().add_header(height, block).expect("can not add header");

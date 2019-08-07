@@ -31,8 +31,6 @@ use std::ops::BitXorAssign;
 
 const K_MAX: usize = 6;
 
-const ID_LEN:usize = 32;
-
 /// trait any key of an IBLT has to implement
 pub trait IBLTKey : BitXorAssign + Copy + Clone + Eq + PartialEq + Default + std::hash::Hash {
     fn hash_to_u64_with_keys (&self, k0: u64, k1: u64) -> u64;
@@ -313,6 +311,7 @@ impl<K: IBLTKey> Iterator for IBLTIterator<K> {
 
 #[cfg(test)]
 mod test {
+    const ID_LEN: usize = 32;
     use super::*;
     use std::collections::HashSet;
     use crate::content::ContentKey;

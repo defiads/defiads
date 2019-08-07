@@ -17,8 +17,7 @@
 //! P2P messages
 use crate::bitcoin_hashes::sha256d;
 use murmel::p2p::{Command, Version, VersionCarrier};
-use std::sync::atomic::AtomicUsize;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::io;
 use crate::error::BiadNetError;
 
@@ -85,6 +84,16 @@ pub struct NetAddress {
 const ONION : [u16; 3] = [0xFD87, 0xD87E, 0xEB43];
 
 impl NetAddress {
+    /// Create an address message for a socket
+    pub fn new (socket :&SocketAddr) -> NetAddress {
+        let (address, port) = match socket {
+            &SocketAddr::V4(ref addr) => (addr.ip().to_ipv6_mapped().segments(), addr.port()),
+            &SocketAddr::V6(ref addr) => (addr.ip().segments(), addr.port())
+        };
+        NetAddress { address: address, port: port }
+    }
+
+
     pub fn socket_address(&self) -> Result<SocketAddr, BiadNetError> {
         let addr = &self.address;
         if addr[0..3] == ONION[0..3] {

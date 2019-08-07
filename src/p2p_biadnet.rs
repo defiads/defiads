@@ -17,37 +17,26 @@
 use std::{
     io,
     collections::HashSet,
-    net::{IpAddr, SocketAddr, SocketAddrV4},
-    path::Path,
-    sync::{Arc, Mutex, RwLock, mpsc, atomic::AtomicUsize},
+    net::SocketAddr,
+    sync::{Arc, Mutex, mpsc},
     time::{UNIX_EPOCH, SystemTime},
     thread
 };
 use bitcoin::{
-    Block, BlockHeader,
-    network::{
-        constants::Network,
-        message::{
-            RawNetworkMessage,
-            NetworkMessage,
-        }
-    }
+    BlockHeader
 };
 use bitcoin_hashes::sha256d;
 use bitcoin_wallet::trunk::Trunk;
 use future::Future;
 use futures::{future, Never, Async, Poll, task,
-              executor::{Executor, ThreadPoolBuilder, ThreadPool}
+              executor::{Executor, ThreadPool}
 };
 
-use log::Level;
 use murmel::{
     dispatcher::Dispatcher,
     p2p::P2P,
-    chaindb::{ChainDB, SharedChainDB},
-    downstream::Downstream,
+    chaindb::SharedChainDB,
     error::MurmelError,
-    headerdownload::HeaderDownload,
     p2p::{
         PeerMessageSender, PeerSource,
         P2PConfig, P2PControl, Buffer
@@ -55,16 +44,12 @@ use murmel::{
     timeout::Timeout
 };
 use rand::{RngCore, thread_rng};
-use simple_logger::init_with_level;
 
 use crate::find_peers::seed;
-use crate::error::BiadNetError;
-use crate::store::ContentStore;
 use crate::messages::{Message, Envelope, VersionMessage, NetAddress};
 use crate::updater::Updater;
 
-use murmel::p2p::Version;
-use serde_cbor::{Deserializer, StreamDeserializer};
+use serde_cbor::Deserializer;
 use crate::db::SharedDB;
 use crate::store::SharedContentStore;
 use murmel::p2p::P2PControlSender;
@@ -97,7 +82,7 @@ impl P2PConfig<Message, Envelope> for BiadnetP2PConfig {
                 timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
                 start_height: 0, // TODO
                 user_agent: "biadnet 0.1.0".to_string(),
-                receiver: NetAddress::default(), // TODO
+                receiver: NetAddress::new(remote),
                 sender: NetAddress::default(), // TODO
             }
         )
@@ -119,7 +104,7 @@ impl P2PConfig<Message, Envelope> for BiadnetP2PConfig {
         0
     }
 
-    fn set_height(&self, height: u32) {
+    fn set_height(&self, _height: u32) {
     }
 
     fn max_protocol_version(&self) -> u32 {
@@ -145,7 +130,7 @@ impl P2PConfig<Message, Envelope> for BiadnetP2PConfig {
     // encode a message in Bitcoin's wire format extending the given buffer
     fn encode(&self, item: &Envelope, dst: &mut Buffer) -> Result<(), io::Error> {
         match serde_cbor::to_writer(dst, item) {
-            Err(e) => Err(io::Error::from(io::ErrorKind::InvalidInput)),
+            Err(_) => Err(io::Error::from(io::ErrorKind::InvalidInput)),
             Ok(_)=> Ok(())
         }
     }
@@ -324,19 +309,6 @@ impl P2PBiadNet {
                     return Some(self.dns[(rng.next_u32() as usize) % self.dns.len()]);
                 }
                 None
-            }
-
-            fn dns_lookup(&mut self) {
-                while self.connections.len() < self.min_connections {
-                    if self.dns.len() == 0 {
-                        self.dns = seed();
-                    }
-                    if self.dns.len() > 0 {
-                        let mut rng = thread_rng();
-                        let addr = self.dns[(rng.next_u64() as usize) % self.dns.len()];
-                        self.connections.push(self.p2p.add_peer("bitcoin", PeerSource::Outgoing(addr)));
-                    }
-                }
             }
         }
     }

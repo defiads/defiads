@@ -16,7 +16,7 @@
 
 //! distributed content
 use crate::bitcoin::PublicKey;
-
+use crate::bitcoin_hashes::hex::ToHex;
 use crate::bitcoin_wallet::{
     proved::ProvedTransaction
 };
@@ -25,13 +25,12 @@ use crate::ad::Ad;
 use crate::iblt::IBLTKey;
 use crate::byteorder::{ByteOrder, LittleEndian};
 
+
 use std::{
-    error,
     ops::BitXorAssign,
     hash::Hasher,
     fmt
 };
-use crate::error::BiadNetError;
 
 const DIGEST_LEN: usize = secp256k1::constants::MESSAGE_SIZE;
 
@@ -62,10 +61,9 @@ impl IBLTKey for ContentKey {
     }
 }
 
-#[cfg(test)]
 impl fmt::Debug for ContentKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "ContentKey{{digest: {} weight: {}}} ", hex::encode(self.digest), self.weight)
+        write!(f, "ContentKey{{digest: {} weight: {}}} ", self.digest.to_hex(), self.weight)
     }
 }
 
