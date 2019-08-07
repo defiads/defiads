@@ -262,7 +262,7 @@ impl P2PBiadNet {
                         }
                         else {
                             error!("no more peers to connect");
-                            return Ok(Async::Ready(()));
+                            return Ok(Async::Pending);
                         }
                     }
                     // find a finished peer
