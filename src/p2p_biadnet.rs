@@ -20,7 +20,8 @@ use std::{
     net::{IpAddr, SocketAddr, SocketAddrV4},
     path::Path,
     sync::{Arc, Mutex, RwLock, mpsc, atomic::AtomicUsize},
-    time::{UNIX_EPOCH, SystemTime}
+    time::{UNIX_EPOCH, SystemTime},
+    thread
 };
 use bitcoin::{
     Block, BlockHeader,
@@ -44,7 +45,6 @@ use murmel::{
     dispatcher::Dispatcher,
     p2p::P2P,
     chaindb::{ChainDB, SharedChainDB},
-    dns::dns_seed,
     downstream::Downstream,
     error::MurmelError,
     headerdownload::HeaderDownload,
@@ -57,6 +57,7 @@ use murmel::{
 use rand::{RngCore, thread_rng};
 use simple_logger::init_with_level;
 
+use crate::find_peers::seed;
 use crate::error::BiadNetError;
 use crate::store::ContentStore;
 use crate::messages::{Message, Envelope, VersionMessage, NetAddress};
@@ -66,6 +67,9 @@ use murmel::p2p::Version;
 use serde_cbor::{Deserializer, StreamDeserializer};
 use crate::db::SharedDB;
 use crate::store::SharedContentStore;
+use murmel::p2p::P2PControlSender;
+use murmel::p2p::PeerMessageReceiver;
+use murmel::p2p::PeerMessage;
 
 const MAGIC: u32 = 0xB1AD;
 const MAX_PROTOCOL_VERSION: u32 = 1;
@@ -218,8 +222,10 @@ impl P2PBiadNet {
 
         let timeout = Arc::new(Mutex::new(Timeout::new(p2p_control.clone())));
 
-        let updater = Updater::new(p2p_control.clone(), timeout);
+        let updater = Updater::new(p2p_control.clone(), timeout.clone());
         dispatcher.add_listener(updater);
+        let address_pool = AddressPoolMaintainer::new(p2p_control.clone(), self.db.clone());
+        dispatcher.add_listener(address_pool);
 
         let p2p2 = p2p.clone();
         let p2p_task = Box::new(future::poll_fn(move |ctx| {
@@ -235,10 +241,10 @@ impl P2PBiadNet {
         thread_pool.spawn(p2p_task).unwrap();
 
         info!("BiadNet p2p engine started");
-        thread_pool.spawn(Self::keep_connected(p2p.clone(), self.peers.clone(), self.connections)).unwrap();
+        thread_pool.spawn(Self::keep_connected(p2p.clone(), self.peers.clone(), self.connections, self.db.clone())).unwrap();
     }
 
-    fn keep_connected(p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize) -> Box<dyn Future<Item=(), Error=Never> + Send> {
+    fn keep_connected(p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize, db: SharedDB) -> Box<dyn Future<Item=(), Error=Never> + Send> {
 
         // add initial peers if any
         let mut added = Vec::new();
@@ -246,12 +252,15 @@ impl P2PBiadNet {
             added.push(p2p.add_peer("biadnet", PeerSource::Outgoing(addr.clone())));
         }
 
+        return Box::new( KeepConnected { min_connections, connections: added, p2p, dns: Vec::new(), earlier: HashSet::new(), db });
+
         struct KeepConnected {
             min_connections: usize,
             connections: Vec<Box<dyn Future<Item=SocketAddr, Error=MurmelError> + Send>>,
             p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>,
             dns: Vec<SocketAddr>,
-            earlier: HashSet<SocketAddr>
+            earlier: HashSet<SocketAddr>,
+            db: SharedDB
         }
 
         // this task runs until it runs out of peers
@@ -262,14 +271,14 @@ impl P2PBiadNet {
             fn poll(&mut self, cx: &mut task::Context) -> Poll<Self::Item, Self::Error> {
                 // return from this loop with 'pending' if enough peers are connected
                 loop {
-                    // add further peers from db if needed
-                    self.peers_from_db();
-                    self.dns_lookup();
-
-                    if self.connections.len() == 0 {
-                        // run out of peers. this is fatal
-                        error!("no more peers to connect");
-                        std::thread::sleep(std::time::Duration::from_secs(10));
+                    while self.connections.len() < self.min_connections {
+                        if let Some(addr) = self.get_an_address() {
+                            self.connections.push(self.p2p.add_peer("biadnet", PeerSource::Outgoing(addr)));
+                        }
+                        else {
+                            error!("no more peers to connect");
+                            return Ok(Async::Ready(()));
+                        }
                     }
                     // find a finished peer
                     let finished = self.connections.iter_mut().enumerate().filter_map(|(i, f)| {
@@ -296,28 +305,88 @@ impl P2PBiadNet {
         }
 
         impl KeepConnected {
-            fn peers_from_db(&mut self) {
-                // TODO
+            fn get_an_address(&mut self) -> Option<SocketAddr> {
+                if let Ok(Some(a)) = self.db.lock().unwrap().transaction().get_an_address(&self.earlier) {
+                    self.earlier.insert(a);
+                    return Some(a);
+                }
+                if self.dns.len() == 0 {
+                    self.dns = seed();
+                    let mut db = self.db.lock().unwrap();
+                    let mut tx = db.transaction();
+                    for a in &self.dns {
+                        tx.store_address("biadnet", a, 0, 0).expect("can not store addresses in db");
+                    }
+                    tx.commit();
+                }
+                if self.dns.len() > 0 {
+                    let mut rng = thread_rng();
+                    return Some(self.dns[(rng.next_u32() as usize) % self.dns.len()]);
+                }
+                None
             }
 
             fn dns_lookup(&mut self) {
                 while self.connections.len() < self.min_connections {
                     if self.dns.len() == 0 {
-                        // TODO self.dns = dns_seed(self.network);
+                        self.dns = seed();
                     }
                     if self.dns.len() > 0 {
                         let mut rng = thread_rng();
                         let addr = self.dns[(rng.next_u64() as usize) % self.dns.len()];
-                        self.connections.push(self.p2p.add_peer("biadnet", PeerSource::Outgoing(addr)));
-                    }
-                    else {
-                        break;
+                        self.connections.push(self.p2p.add_peer("bitcoin", PeerSource::Outgoing(addr)));
                     }
                 }
             }
         }
+    }
+}
 
-        Box::new(KeepConnected { min_connections, connections: added, p2p, dns: Vec::new(), earlier: HashSet::new() })
+struct AddressPoolMaintainer {
+    p2p: P2PControlSender<Message>,
+    db: SharedDB
+}
+
+impl AddressPoolMaintainer {
+    pub fn new(p2p: P2PControlSender<Message>, db: SharedDB) -> PeerMessageSender<Message>  {
+        let (sender, receiver) = mpsc::sync_channel(p2p.back_pressure);
+        let mut m = AddressPoolMaintainer { p2p, db };
+
+        thread::Builder::new().name("address pool".to_string()).spawn(move || { m.run(receiver) }).unwrap();
+
+        PeerMessageSender::new(sender)
+    }
+
+    fn run(&mut self, receiver: PeerMessageReceiver<Message>) {
+        while let Ok(msg) = receiver.recv () {
+            match msg {
+                PeerMessage::Connected(pid) => {
+                    if let Some(address) = self.p2p.peer_address(pid) {
+                        let mut db = self.db.lock().unwrap();
+                        let mut tx = db.transaction();
+                        debug!("store successful connection to {} peer={}", &address, pid);
+                        tx.store_address("biadnet", &address,
+                                         SystemTime::now().duration_since(
+                                             SystemTime::UNIX_EPOCH).unwrap().as_secs(), 0).unwrap();
+                        tx.commit();
+                    }
+                }
+                PeerMessage::Disconnected(pid, banned) => {
+                    if banned {
+                        if let Some(address) = self.p2p.peer_address(pid) {
+                            let mut db = self.db.lock().unwrap();
+                            let mut tx = db.transaction();
+                            let now = SystemTime::now().duration_since(
+                                SystemTime::UNIX_EPOCH).unwrap().as_secs();
+                            debug!("store ban of {} peer={}", &address, pid);
+                            tx.store_address("biadnet", &address, 0, now).unwrap();
+                            tx.commit();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 }
 

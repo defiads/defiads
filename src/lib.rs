@@ -47,6 +47,7 @@ mod iblt;
 mod messages;
 mod content;
 mod funding;
+pub mod find_peers;
 pub mod store;
 pub mod db;
 pub mod updater;

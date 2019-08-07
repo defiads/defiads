@@ -31,6 +31,7 @@ use biadne::p2p_bitcoin::{ChainDBTrunk, P2PBitcoin};
 use biadne::p2p_biadnet::P2PBiadNet;
 use biadne::db::DB;
 use biadne::store::ContentStore;
+use biadne::find_peers::BIADNET_PORT;
 use futures::future::Empty;
 use murmel::chaindb::ChainDB;
 
@@ -39,11 +40,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::{Arc,RwLock, Mutex};
 
-
-const MY_SERVER: &str = "87.230.22.85";
-const BIADNET_PORT: u16 = 8444;
-const BITCOIN_PORT: u16 = 8333;
-const STORAGE_LIMIT: u64 = 2^20;
+pub const STORAGE_LIMIT: u64 = 2^20;
 
 pub fn main () {
     let cmd = CommandLine::new();
@@ -56,9 +53,7 @@ pub fn main () {
     let biadnet_connections = cmd.opt_arg_usize("biadnet-connections").unwrap_or(5);
     let bitcoin_connections = cmd.opt_arg_usize("bitcoin-connections").unwrap_or(5);
 
-    let biadnet_peers = get_socket_vec(
-        Some(cmd.opt_arg("biadnet-peers").unwrap_or(
-            (MY_SERVER.to_string() + ":") + BIADNET_PORT.to_string().as_str()))).unwrap_or(Vec::new());
+    let biadnet_peers = get_socket_vec(cmd.opt_arg("biadnet-peers")).unwrap_or(Vec::new());
     let bitcoin_peers = get_socket_vec(cmd.opt_arg("bitcoin-peers")).unwrap_or(Vec::new());
 
     let biadnet_listen = get_socket_vec(
