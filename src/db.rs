@@ -32,8 +32,10 @@ use serde_cbor;
 use rusqlite::NO_PARAMS;
 use crate::iblt::IBLT;
 use crate::content::ContentKey;
+use crate::byteorder::ByteOrder;
 use std::io::Cursor;
 use crate::iblt::IBLTKey;
+use byteorder::LittleEndian;
 
 pub type SharedDB = Arc<Mutex<DB>>;
 
@@ -92,28 +94,28 @@ impl<'db> TX<'db> {
                 length number
             ) without rowid;
 
-            create table if not exists iblt (
-                length number primary key,
-                filter blob
-            ) without rowid;
-
         "#).expect("failed to create db tables");
     }
 
-    pub fn store_iblt(&mut self, iblt: &IBLT<ContentKey>) -> Result<usize, BiadNetError> {
-        let ser = serde_cbor::ser::to_vec_packed(&iblt)?;
-        Ok(self.tx.execute(r#"
-            insert or replace into iblt (length, filter)
-            values (?1, ?2)
-        "#, &[&(iblt.len() as u32) as &ToSql, &ser])?)
-    }
+    pub fn compute_iblt (&mut self, len: usize) -> Result<IBLT<ContentKey>, BiadNetError> {
+        // number of hash functions
+        const NH:usize = 4;
+        // random, I swear
+        const K0:u64 = 1614418600579272000;
+        const K1:u64 = 8727507265883984962;
 
-    pub fn read_iblt(&mut self, len: usize) -> Result<IBLT<ContentKey>, BiadNetError> {
-        Ok(self.tx.query_row(r#"
-            select filter from iblt where length = ?1
-        "#, &[&(len as u32) as &ToSql], |r|
-            Ok(serde_cbor::from_reader(Cursor::new(r.get_unwrap::<usize, Vec<u8>>(0)))
-                .expect("corrupted iblt in db")))?)
+        let mut iblt = IBLT::new(len, NH, K0, K1);
+
+        let mut query = self.tx.prepare(r#"
+            select id, weight from content
+        "#)?;
+        for r in query.query_map::<(String, u32),&[&ToSql],_>(NO_PARAMS,
+                                                              |r| Ok((r.get(0)?,r.get(1)?)))? {
+            if let Ok((id, weight)) = r {
+                iblt.insert(&ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..], weight));
+            }
+        }
+        Ok(iblt)
     }
 
     pub fn store_content(&mut self, height: u32, block_id: &sha256d::Hash, c: &Content, amount: u64) -> Result<usize, BiadNetError> {
@@ -219,13 +221,6 @@ impl<'db> TX<'db> {
         let mut query = self.tx.prepare(r#"
             select id, weight from content where id in (select id from temp.ids)
         "#)?;
-
-        for r in query.query_map::<(String, u32),&[&ToSql],_>(NO_PARAMS,
-                                                              |r| Ok((r.get(0)?,r.get(1)?)))? {
-            if let Ok((id, weight)) = r {
-                keys.push(ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..], weight));
-            }
-        }
 
         for r in query.query_map::<(String, u32),&[&ToSql],_>(NO_PARAMS,
                                                               |r| Ok((r.get(0)?,r.get(1)?)))? {
