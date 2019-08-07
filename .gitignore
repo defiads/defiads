@@ -7,3 +7,4 @@ Cargo.lock
 *.bl
 *.lg
 *.tb
+biad.db
