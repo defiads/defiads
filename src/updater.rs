@@ -24,15 +24,16 @@ use std::thread;
 use std::time::Duration;
 use crate::store::SharedContentStore;
 use crate::messages::PollContentMessage;
+use crate::p2p_biadnet::ExpectedReply;
 
 pub struct Updater {
     p2p: P2PControlSender<Message>,
-    timeout: SharedTimeout<Message>,
+    timeout: SharedTimeout<Message, ExpectedReply>,
     store: SharedContentStore
 }
 
 impl Updater {
-    pub fn new(p2p: P2PControlSender<Message>, timeout: SharedTimeout<Message>, store: SharedContentStore) -> PeerMessageSender<Message> {
+    pub fn new(p2p: P2PControlSender<Message>, timeout: SharedTimeout<Message, ExpectedReply>, store: SharedContentStore) -> PeerMessageSender<Message> {
         let (sender, receiver) = mpsc::sync_channel(p2p.back_pressure);
 
         let mut updater = Updater { p2p, timeout, store };
@@ -58,18 +59,22 @@ impl Updater {
                                 }
                             );
                             self.p2p.send_network(pid, message);
+                            self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::PollContent);
                         }
                     }
                     PeerMessage::Disconnected(_,_) => {
                     }
-                    PeerMessage::Message(_, msg) => {
+                    PeerMessage::Message(pid, msg) => {
                         match msg {
+                            Message::PollContent(poll) => {
+
+                            },
                             _ => {  }
                         }
                     }
                 }
             }
-            //self.timeout.lock().unwrap().check(vec!(ExpectedReply::Headers));
+            self.timeout.lock().unwrap().check(vec!(ExpectedReply::PollContent));
         }
     }
 }

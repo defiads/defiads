@@ -362,6 +362,11 @@ impl AddressPoolMaintainer {
     }
 }
 
+#[derive(Eq, PartialEq, Hash, Debug)]
+pub enum ExpectedReply {
+    PollContent
+}
+
 pub struct ChainDBTrunk {
     pub chaindb: SharedChainDB
 }
