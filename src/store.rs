@@ -17,6 +17,7 @@
 //! store
 
 use bitcoin::{BlockHeader, BitcoinHash};
+use bitcoin_hashes::sha256d;
 use secp256k1::{Secp256k1, All};
 use bitcoin_wallet::trunk::Trunk;
 use std::sync::{RwLock, Arc};
@@ -35,7 +36,7 @@ const MIN_SKETCH_SIZE: usize = 20;
 
 pub type SharedContentStore = Arc<RwLock<ContentStore>>;
 
-/// the distributed content torage
+/// the distributed content storage
 pub struct ContentStore {
     ctx: Secp256k1<All>,
     trunk: Arc<dyn Trunk + Send + Sync>,
@@ -43,7 +44,8 @@ pub struct ContentStore {
     storage_limit: u64,
     iblts: HashMap<u32, IBLT<ContentKey>>,
     min_sketch: Vec<u64>,
-    ksequence: Vec<(u64, u64)>
+    ksequence: Vec<(u64, u64)>,
+    n_keys: u32
 }
 
 impl ContentStore {
@@ -51,12 +53,14 @@ impl ContentStore {
     pub fn new(db: SharedDB, storage_limit: u64, trunk: Arc<dyn Trunk + Send + Sync>) -> Result<ContentStore, BiadNetError> {
         let mut mins;
         let ksequence;
+        let n_keys;
         {
             let mut db = db.lock().unwrap();
             let mut tx = db.transaction();
-            let (m, k) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
+            let (m, k, n) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
             mins = m;
             ksequence = k;
+            n_keys = n;
         }
         Ok(ContentStore {
             ctx: Secp256k1::new(),
@@ -65,8 +69,24 @@ impl ContentStore {
             storage_limit,
             iblts: HashMap::new(),
             min_sketch: mins,
-            ksequence
+            ksequence,
+            n_keys
         })
+    }
+
+    pub fn get_nkeys (&self) -> u32 {
+        self.n_keys
+    }
+
+    pub fn get_sketch(&self) -> &Vec<u64> {
+        &self.min_sketch
+    }
+
+    pub fn get_tip (&self) -> Option<sha256d::Hash> {
+        if let Some(header) = self.trunk.get_tip() {
+            return Some(header.bitcoin_hash());
+        }
+        None
     }
 
     /// add a header to the tip of the chain
@@ -82,9 +102,10 @@ impl ContentStore {
             }
         }
         if deleted_some {
-            let (m, k) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
+            let (m, k, n) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
             self.min_sketch = m;
             self.ksequence = k;
+            self.n_keys = n;
         }
         tx.commit();
         Ok(())
@@ -103,9 +124,10 @@ impl ContentStore {
             }
         }
         if deleted_some {
-            let (m, k) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
+            let (m, k, n) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
             self.min_sketch = m;
             self.ksequence = k;
+            self.n_keys = n;
         }
         tx.commit();
         return Ok(())
@@ -122,9 +144,10 @@ impl ContentStore {
             }
         }
         if deleted_some {
-            let (m, k) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
+            let (m, k, n) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
             self.min_sketch = m;
             self.ksequence = k;
+            self.n_keys = n;
         }
         tx.commit();
         return Ok(())
@@ -155,6 +178,7 @@ impl ContentStore {
                                     i.insert(&key);
                                 }
                                 add_to_min_sketch(&mut self.min_sketch, &key, &self.ksequence);
+                                self.n_keys += 1;
                                 {
                                     let mut db = self.db.lock().unwrap();
                                     let mut tx = db.transaction();

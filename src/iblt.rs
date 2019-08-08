@@ -149,13 +149,15 @@ impl<K : IBLTKey> IBLT<K> {
 }
 
 /// compute a vector suitable to estimate set difference size
-pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut dyn Iterator<Item=impl IBLTKey>) -> (Vec<u64>, Vec<(u64,u64)>) {
+pub fn min_sketch(n:usize, k0: u64, k1: u64, ids: &mut dyn Iterator<Item=impl IBLTKey>) -> (Vec<u64>, Vec<(u64,u64)>, u32) {
     let ksequence = generate_ksequence(n, k0, k1);
     let mut min_hashes = vec![0xffffffffffffffff; n];
+    let mut n_keys = 0;
     for id in ids {
         add_to_min_sketch(&mut min_hashes, &id, &ksequence);
+        n_keys += 1;
     }
-    (min_hashes, ksequence)
+    (min_hashes, ksequence, n_keys)
 }
 
 pub fn add_to_min_sketch(min_hashes: &mut Vec<u64>, key: &impl IBLTKey, ksequence: &Vec<(u64, u64)>) {
@@ -447,10 +449,10 @@ mod test {
         let k0 = 0;
         let k1 = 0;
 
-        let (a_sketch, _) = min_sketch(10, k0, k1, &mut a.iter().cloned());
+        let (a_sketch, _, _) = min_sketch(10, k0, k1, &mut a.iter().cloned());
         let al = a.len();
 
-        let (b_sketch, _) = min_sketch(10, k0, k1, &mut b.iter().cloned());
+        let (b_sketch, _, _) = min_sketch(10, k0, k1, &mut b.iter().cloned());
         let bl = b.len();
 
         let buckets = estimate_diff_size(a_sketch.as_slice(), al, b_sketch.as_slice(), bl)*3/2;

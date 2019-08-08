@@ -22,17 +22,20 @@ use crate::messages::Message;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
+use crate::store::SharedContentStore;
+use crate::messages::PollContentMessage;
 
 pub struct Updater {
     p2p: P2PControlSender<Message>,
-    timeout: SharedTimeout<Message>
+    timeout: SharedTimeout<Message>,
+    store: SharedContentStore
 }
 
 impl Updater {
-    pub fn new(p2p: P2PControlSender<Message>, timeout: SharedTimeout<Message>) -> PeerMessageSender<Message> {
+    pub fn new(p2p: P2PControlSender<Message>, timeout: SharedTimeout<Message>, store: SharedContentStore) -> PeerMessageSender<Message> {
         let (sender, receiver) = mpsc::sync_channel(p2p.back_pressure);
 
-        let mut updater = Updater { p2p, timeout };
+        let mut updater = Updater { p2p, timeout, store };
 
         thread::Builder::new().name("biadnet updater".to_string()).spawn(move || { updater.run(receiver) }).unwrap();
 
@@ -43,7 +46,19 @@ impl Updater {
         loop {
             while let Ok(msg) = receiver.recv_timeout(Duration::from_millis(1000)) {
                 match msg {
-                    PeerMessage::Connected(_) => {
+                    PeerMessage::Connected(pid) => {
+                        let store = self.store.read().unwrap();
+                        if let Some(tip) = store.get_tip() {
+                            let sketch = store.get_sketch().clone();
+                            let message = Message::PollContent(
+                                PollContentMessage {
+                                    tip,
+                                    sketch,
+                                    size: store.get_nkeys()
+                                }
+                            );
+                            self.p2p.send_network(pid, message);
+                        }
                     }
                     PeerMessage::Disconnected(_,_) => {
                     }

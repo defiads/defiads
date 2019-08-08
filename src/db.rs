@@ -116,7 +116,7 @@ impl<'db> TX<'db> {
         Ok(iblt)
     }
 
-    pub fn compute_min_sketch (&mut self, len: usize) -> Result<(Vec<u64>, Vec<(u64, u64)>), BiadNetError> {
+    pub fn compute_min_sketch (&mut self, len: usize) -> Result<(Vec<u64>, Vec<(u64, u64)>, u32), BiadNetError> {
         let mut query = self.tx.prepare(r#"
             select id, weight from content
         "#)?;

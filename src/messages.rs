@@ -141,10 +141,10 @@ pub struct VersionMessage {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PollContentMessage {
     /// known chain tip of Bitcoin
-    tip: sha256d::Hash,
+    pub tip: sha256d::Hash,
     /// min sketch of own id set
-    sketch: Vec<u64>,
+    pub sketch: Vec<u64>,
     /// own set size
-    size: usize
+    pub size: u32
 }
 
