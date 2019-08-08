@@ -23,8 +23,6 @@ use crate::bitcoin_wallet::{
 
 use crate::ad::Ad;
 use crate::iblt::IBLTKey;
-use crate::byteorder::{ByteOrder, LittleEndian};
-
 
 use std::{
     ops::BitXorAssign,

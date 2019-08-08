@@ -56,7 +56,10 @@ impl Updater {
         loop {
             while let Ok(msg) = receiver.recv_timeout(Duration::from_millis(1000)) {
                 match msg {
-                    PeerMessage::Connected(pid) => self.poll_content(pid),
+                    PeerMessage::Connected(pid) => {
+                        debug!("content poll peer={}", pid);
+                        self.poll_content(pid)
+                    },
                     PeerMessage::Disconnected(pid,_) => {
                         self.poll_asked.remove(&pid);
                     }
@@ -64,6 +67,7 @@ impl Updater {
                         match msg {
                             Message::PollContent(poll) => {
                                 if let Some(question) = self.poll_asked.remove(&pid) {
+                                    debug!("got content poll reply from peer={}", pid);
                                     // this is a reply
                                     self.timeout.lock().unwrap().received(pid, 1, ExpectedReply::PollContent);
                                     let mut store = self.store.write().unwrap();
@@ -86,11 +90,13 @@ impl Updater {
                                 }
                                 else {
                                     // this is initial request
+                                    debug!("reply content poll to peer={}", pid);
                                     self.poll_content(pid)
                                 }
                             },
                             Message::IBLT(tip, mut iblt) => {
                                 self.timeout.lock().unwrap().received(pid, 1, ExpectedReply::IBLT);
+                                debug!("received IBLT from peer={}", pid);
                                 let mut store = self.store.write().unwrap();
                                 if let Some(our_tip) = store.get_tip() {
                                     if tip == our_tip {
@@ -113,6 +119,7 @@ impl Updater {
                                             }
                                         }
                                         let len = request.len();
+                                        debug!("asking for {} contents from peer={}", len, pid);
                                         if len > 0 {
                                             self.timeout.lock().unwrap().expect(pid, len, ExpectedReply::Content);
                                             self.p2p.send_network(pid, Message::Get(request));
@@ -121,23 +128,27 @@ impl Updater {
                                 }
                             },
                             Message::Content(content) =>{
+                                debug!("received content {} from peer={}", content.ad.digest(), pid);
                                 self.timeout.lock().unwrap().received(pid, 1, ExpectedReply::Content);
                                 let mut store = self.store.write().unwrap();
                                 if store.add_content(&content).is_err() {
                                     debug!("failed to add content {} peer={}", content.ad.digest(), pid);
                                 }
                                 if !self.timeout.lock().unwrap().is_busy_with(pid, ExpectedReply::Content) {
+                                    debug!("truncating db");
                                     store.truncate_to_limit().expect("failed to truncate db to maz size");
                                 }
                             },
                             Message::Get(ids) => {
+                                debug!("received {} get requests from peer={}", ids.len(), pid);
                                 let store = self.store.read().unwrap();
                                 for id in &ids {
                                     if let Ok(Some(content)) = store.get_content(id) {
+                                        debug!("delivering content {} to peer={}", id, pid);
                                         self.p2p.send_network(pid, Message::Content(content));
                                     }
                                     else {
-                                        debug!("can not find requested content {}", id);
+                                        debug!("can not find requested content {} peer={}", id, pid);
                                     }
                                 }
                             }

@@ -105,11 +105,11 @@ impl<'db> TX<'db> {
         let mut iblt = IBLT::new(len, NH, K0, K1);
 
         let mut query = self.tx.prepare(r#"
-            select id, weight from content
+            select id from content
         "#)?;
-        for r in query.query_map::<(String, u32),&[&ToSql],_>(NO_PARAMS,
-                                                              |r| Ok((r.get(0)?,r.get(1)?)))? {
-            if let Ok((id, weight)) = r {
+        for r in query.query_map::<String,&[&ToSql],_>(NO_PARAMS,
+                                                              |r| Ok(r.get(0)?))? {
+            if let Ok(id) = r {
                 iblt.insert(&ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..]));
             }
         }
