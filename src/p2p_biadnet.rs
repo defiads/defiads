@@ -272,12 +272,12 @@ impl P2PBiadNet {
                         // note that poll is reusing context of this poll, so wakeups come here
                         match f.poll(cx) {
                             Ok(Async::Pending) => None,
-                            Ok(Async::Ready(e)) => {
-                                trace!("woke up to lost peer");
-                                Some((i, Ok(e)))
+                            Ok(Async::Ready(address)) => {
+                                debug!("keep connected woke up to lost peer at {}", address);
+                                Some((i, Ok(address)))
                             }
                             Err(e) => {
-                                trace!("woke up to peer error");
+                                debug!("keep connected woke up to error {:?}", e);
                                 Some((i, Err(e)))
                             }
                         }
