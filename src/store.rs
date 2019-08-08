@@ -89,6 +89,12 @@ impl ContentStore {
         None
     }
 
+    pub fn get_iblt(&mut self, size: u32) -> Result<&IBLT<ContentKey>, BiadNetError> {
+        let mut db = self.db.lock().unwrap();
+        let mut tx = db.transaction();
+        Ok(self.iblts.entry(size).or_insert(tx.compute_iblt(size)?))
+    }
+
     /// add a header to the tip of the chain
     pub fn add_header(&mut self, height: u32, header: &BlockHeader) -> Result<(), BiadNetError> {
         info!("new chain tip {}", header.bitcoin_hash());

@@ -20,6 +20,8 @@ use murmel::p2p::{Command, Version, VersionCarrier};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::io;
 use crate::error::BiadNetError;
+use crate::iblt::IBLT;
+use crate::content::ContentKey;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Envelope {
@@ -32,7 +34,8 @@ impl Command for Envelope {
         match self.payload {
             Message::Version(_) => "version",
             Message::Verack => "verack",
-            Message::PollContent(_) => "poll content"
+            Message::PollContent(_) => "poll content",
+            Message::IBLT(_) => "iblt"
         }.to_string()
     }
 }
@@ -43,6 +46,7 @@ pub enum Message {
     Version(VersionMessage),
     Verack,
     PollContent(PollContentMessage),
+    IBLT(IBLT<ContentKey>)
 }
 
 impl Version for Message {
@@ -147,4 +151,3 @@ pub struct PollContentMessage {
     /// own set size
     pub size: u32
 }
-

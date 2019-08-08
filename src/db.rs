@@ -101,7 +101,7 @@ impl<'db> TX<'db> {
         "#).expect("failed to create db tables");
     }
 
-    pub fn compute_iblt (&mut self, len: usize) -> Result<IBLT<ContentKey>, BiadNetError> {
+    pub fn compute_iblt (&mut self, len: u32) -> Result<IBLT<ContentKey>, BiadNetError> {
         let mut iblt = IBLT::new(len, NH, K0, K1);
 
         let mut query = self.tx.prepare(r#"
