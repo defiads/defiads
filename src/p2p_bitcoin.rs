@@ -165,19 +165,19 @@ impl P2PBitcoin {
                         // note that poll is reusing context of this poll, so wakeups come here
                         match f.poll(cx) {
                             Ok(Async::Pending) => None,
-                            Ok(Async::Ready(e)) => {
-                                trace!("woke up to lost peer");
-                                Some((i, Ok(e)))
+                            Ok(Async::Ready(address)) => {
+                                trace!("keep connected woke up to lost peer at {}", address);
+                                Some((i, Ok(address)))
                             }
                             Err(e) => {
-                                trace!("woke up to peer error");
+                                trace!("keep connected woke up to error {:?}", e);
                                 Some((i, Err(e)))
                             }
                         }
                     }).next();
                     match finished {
-                        Some((i, _)) => self.connections.remove(i),
-                        None => return Ok(Async::Pending)
+                        Some((i, _)) => {self.connections.remove(i);},
+                        None => {}
                     };
                 }
             }
@@ -199,8 +199,13 @@ impl P2PBitcoin {
                     tx.commit();
                 }
                 if self.dns.len() > 0 {
-                    let mut rng = thread_rng();
-                    return Some(self.dns[(rng.next_u32() as usize) % self.dns.len()]);
+                    let eligible = self.dns.iter().filter(|a| !self.earlier.contains(a)).cloned().collect::<Vec<_>>();
+                    if eligible.len() > 0 {
+                        let mut rng = thread_rng();
+                        let choice = eligible[(rng.next_u32() as usize) % eligible.len()];
+                        self.earlier.insert(choice.clone());
+                        return Some(choice);
+                    }
                 }
                 None
             }

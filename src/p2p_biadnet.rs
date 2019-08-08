@@ -273,11 +273,11 @@ impl P2PBiadNet {
                         match f.poll(cx) {
                             Ok(Async::Pending) => None,
                             Ok(Async::Ready(address)) => {
-                                debug!("keep connected woke up to lost peer at {}", address);
+                                trace!("keep connected woke up to lost peer at {}", address);
                                 Some((i, Ok(address)))
                             }
                             Err(e) => {
-                                debug!("keep connected woke up to error {:?}", e);
+                                trace!("keep connected woke up to error {:?}", e);
                                 Some((i, Err(e)))
                             }
                         }
