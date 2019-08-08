@@ -276,7 +276,9 @@ impl<'db> TX<'db> {
     pub fn store_address(&mut self, network: &str, address: &SocketAddr, mut last_seen: u64, mut banned: u64) -> Result<usize, BiadNetError>  {
         if let Ok((ls, b)) = self.tx.query_row(r#"
                 select last_seen, banned from address where network = ?1 and ip = ?2
-            "#, &[&network.to_string() as &dyn ToSql, &address.to_string()], |r| Ok((r.get(0).unwrap_or(0i64), r.get(1).unwrap_or(0i64)))) {
+            "#, &[&network.to_string() as &dyn ToSql, &address.to_string()],
+                                               |r| Ok((r.get(0).unwrap_or(0i64),
+                                                       r.get(1).unwrap_or(0i64)))) {
             // do not reduce last_seen or banned fields
             last_seen = std::cmp::max(ls as u64, last_seen);
             banned = std::cmp::max(b as u64, banned);
@@ -288,12 +290,6 @@ impl<'db> TX<'db> {
         )
     }
 
-    pub fn delete_address(&mut self, network: &str, address: &SocketAddr) -> Result<usize, BiadNetError>  {
-        Ok(self.tx.execute(r#"
-                delete from address where ip = ?1 and network = ?2
-            "#, &[&address.to_string() as &dyn ToSql, &network.to_string()])?)
-    }
-
     // get an address not banned during the last day
     // the probability to be selected is exponentially higher for those with higher last_seen time
     pub fn get_an_address(&self, network: &str, other_than: &HashSet<SocketAddr>) -> Result<Option<SocketAddr>, BiadNetError> {
@@ -301,10 +297,10 @@ impl<'db> TX<'db> {
 
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
         let mut statement = self.tx.prepare(r#"
-            select ip from address where network = :network and banned < :banned order by last_seen desc
+            select ip from address where network = ?1 and banned < ?2 order by last_seen desc
         "#)?;
-        let eligible = statement.query_map_named::<SocketAddr, _>(
-            &[(":banned", &((now - BAN_TIME) as i64)), ("network", &network.to_string())],
+        let eligible = statement.query_map::<SocketAddr, _, _>(
+            &[&((now - BAN_TIME) as i64) as &ToSql, &network.to_string()],
             |row| {
                 let s = row.get_unwrap::<usize, String>(0);
                 let addr = SocketAddr::from_str(s.as_str()).expect("address stored in db should be parsable");
@@ -333,25 +329,33 @@ mod test {
     use bitcoin::network::constants::Network;
     use bitcoin::util::key::PublicKey;
     use crate::ad::Ad;
+    use std::time::UNIX_EPOCH;
 
     #[test]
     pub fn test_db () {
         let mut db = DB::memory().unwrap();
         {
+            let addr = SocketAddr::from_str("127.0.0.1:8444").unwrap();
+            let mut seen = HashSet::new();
+            seen.insert (addr);
+
             let mut tx = db.transaction();
             tx.create_tables();
-            tx.store_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap(), 0, 0).unwrap();
-            tx.store_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap(), 1, 1).unwrap();
+            // store address
+            tx.store_address("biadnet", &addr, 0, 0).unwrap();
+            // update
+            tx.store_address("biadnet", &addr, 1, 1).unwrap();
+            //find
             tx.get_an_address("biadnet", &HashSet::new()).unwrap();
-            assert!(tx.get_an_address("biadnet", &vec!(SocketAddr::from_str("127.0.0.1:8444").unwrap()).iter().cloned().collect::<HashSet<SocketAddr>>()).unwrap().is_none());
+            // should not find if seen
+            assert!(tx.get_an_address("biadnet", &seen).unwrap().is_none());
+            // ban
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+            tx.store_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap(), 1, now).unwrap();
+            // should not find if banned
+            assert!(tx.get_an_address("biadnet", &HashSet::new()).unwrap().is_none());
             tx.commit();
         }
-        {
-            let mut tx = db.transaction();
-            tx.delete_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap()).unwrap();
-            tx.commit();
-        }
-
         {
             let mut tx = db.transaction();
             let block = genesis_block(Network::Bitcoin);
