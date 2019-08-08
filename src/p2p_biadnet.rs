@@ -283,8 +283,8 @@ impl P2PBiadNet {
                         }
                     }).next();
                     match finished {
-                        Some((i, _)) => self.connections.remove(i),
-                        None => return Ok(Async::Pending)
+                        Some((i, _)) => {self.connections.remove(i);},
+                        None => {}
                     };
                 }
             }
@@ -306,8 +306,11 @@ impl P2PBiadNet {
                     tx.commit();
                 }
                 if self.dns.len() > 0 {
-                    let mut rng = thread_rng();
-                    return Some(self.dns[(rng.next_u32() as usize) % self.dns.len()]);
+                    let eligible = self.dns.iter().filter(|a| !self.earlier.contains(a)).cloned().collect::<Vec<_>>();
+                    if eligible.len() > 0 {
+                        let mut rng = thread_rng();
+                        return Some(eligible[(rng.next_u32() as usize) % eligible.len()]);
+                    }
                 }
                 None
             }
