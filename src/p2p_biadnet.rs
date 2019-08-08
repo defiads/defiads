@@ -63,6 +63,7 @@ use futures::task::Waker;
 const MAGIC: u32 = 0xB1AD;
 const MAX_PROTOCOL_VERSION: u32 = 1;
 const MIN_PROTOCOL_VERSION: u32 = 1;
+const MAX_MESSAGE_SIZE:usize = 2^26;
 
 #[derive(Clone)]
 struct BiadnetP2PConfig {
@@ -127,8 +128,8 @@ impl P2PConfig<Message, Envelope> for BiadnetP2PConfig {
         Envelope{magic: MAGIC, payload: m}
     }
 
-    fn unwrap(&self, e: Envelope) -> Message {
-        e.payload
+    fn unwrap(&self, e: Envelope) -> Result<Message, io::Error> {
+        Ok(e.payload)
     }
 
     // encode a message in Bitcoin's wire format extending the given buffer
@@ -149,6 +150,9 @@ impl P2PConfig<Message, Envelope> for BiadnetP2PConfig {
         }
         match decode {
             None => {
+                if src.len() > MAX_MESSAGE_SIZE {
+                    return  Err(io::Error::from(io::ErrorKind::InvalidInput));
+                }
                 src.rollback();
                 return Ok(None);
             }
