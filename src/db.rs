@@ -33,6 +33,7 @@ use rusqlite::NO_PARAMS;
 use crate::iblt::IBLT;
 use crate::content::ContentKey;
 use crate::iblt::min_sketch;
+use rand_distr::Poisson;
 
 pub type SharedDB = Arc<Mutex<DB>>;
 
@@ -302,17 +303,23 @@ impl<'db> TX<'db> {
         let mut statement = self.tx.prepare(r#"
             select ip from address where network = :network and banned < :banned order by last_seen desc
         "#)?;
-        let eligible = statement.query_map_named::<String, _>(
+        let eligible = statement.query_map_named::<SocketAddr, _>(
             &[(":banned", &((now - BAN_TIME) as i64)), ("network", &network.to_string())],
-                                                 |row| row.get(0))?
-            .filter_map(|r| match r { Ok(ref s) => Some(s.clone()), _ => None})
-            .filter(move |s| !other_than.contains(&SocketAddr::from_str(s).expect("address stored in db should be parsable")))
-            .collect::<Vec<String>>();
+            |row| {
+                let s = row.get_unwrap::<usize, String>(0);
+                let addr = SocketAddr::from_str(s.as_str()).expect("address stored in db should be parsable");
+                Ok(addr) })?
+            .filter_map(|socket|
+                match socket {
+                    Ok(a) => if !other_than.contains(&a) { Some(a)} else {None},
+                    Err(_) =>   None }).collect::<Vec<_>>();
         let len = eligible.len();
         if len == 0 {
             return Ok(None);
         }
-        Ok(Some(SocketAddr::from_str(eligible.iter().take_while(|_| thread_rng().gen_bool(0.7)).last().unwrap_or(&eligible[0]).as_str())?))
+        Ok(Some(
+            eligible[
+                std::cmp::min(len-1, thread_rng().sample::<f64,_>(Poisson::new(len as f64 / 4.0).unwrap()) as usize)]))
     }
 }
 

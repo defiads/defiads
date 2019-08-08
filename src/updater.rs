@@ -77,14 +77,16 @@ impl Updater {
                                             // compute and send our iblt
                                             let diff = estimate_diff_size(
                                                 question.sketch.as_slice(), question.size,
-                                                poll.sketch.as_slice(), poll.size);
-                                            let mut size = MINIMUM_IBLT_SIZE;
-                                            while size < MAXIMUM_IBLT_SIZE && size < diff {
-                                                size <<= 2;
+                                                poll.sketch.as_slice(), poll.size)*3/2;
+                                            if diff > 0 {
+                                                let mut size = MINIMUM_IBLT_SIZE;
+                                                while size < MAXIMUM_IBLT_SIZE && size < diff {
+                                                    size <<= 2;
+                                                }
+                                                let iblt = store.get_iblt(size).expect("could not compute IBLT").clone();
+                                                self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::IBLT);
+                                                self.p2p.send_network(pid, Message::IBLT(our_tip, iblt));
                                             }
-                                            let iblt = store.get_iblt(size).expect("could not compute IBLT").clone();
-                                            self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::IBLT);
-                                            self.p2p.send_network(pid, Message::IBLT(our_tip, iblt));
                                         }
                                     }
                                     else {
@@ -122,10 +124,13 @@ impl Updater {
                                             }
                                         }
                                         let len = request.len();
-                                        debug!("asking for {} contents from peer={}", len, pid);
                                         if len > 0 {
+                                            debug!("asking for {} contents from peer={}", len, pid);
                                             self.timeout.lock().unwrap().expect(pid, len, ExpectedReply::Content);
                                             self.p2p.send_network(pid, Message::Get(request));
+                                        }
+                                        else {
+                                            debug!("in sync with peer={}", pid);
                                         }
                                     }
                                     else {

@@ -21,6 +21,7 @@ bitcoin-wallet={git="https://github.com/tamasblummer/rust-wallet.git", branch = 
 murmel={git="https://github.com/tamasblummer/murmel.git", branch = "master"}
 siphasher="0.3"
 rand = "0.7"
+rand_distr = "0.2"
 log="0.4"
 simple_logger = "0.5"
 futures={ git= "https://github.com/tamasblummer/futures-rs.git", tag = "0.2.1" }
