@@ -17,7 +17,7 @@
 //! store
 
 use bitcoin::{BlockHeader, BitcoinHash};
-use bitcoin_hashes::sha256d;
+use bitcoin_hashes::{sha256, sha256d};
 use secp256k1::{Secp256k1, All};
 use bitcoin_wallet::trunk::Trunk;
 use std::sync::{RwLock, Arc};
@@ -159,6 +159,12 @@ impl ContentStore {
         return Ok(())
     }
 
+    pub fn get_content(&self, digest: &sha256::Hash) -> Result<Option<Content>, BiadNetError> {
+        let mut db = self.db.lock().unwrap();
+        let tx = db.transaction();
+        Ok(tx.read_content(digest)?)
+    }
+
     /// add content
     pub fn add_content(&mut self, content: &Content) -> Result<bool, BiadNetError> {
         // is the block on trunk the proof refers to
@@ -178,8 +184,7 @@ impl ContentStore {
                             if let Some((_, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
                                 // ok there is a commitment to this ad
                                 info!("add content {}", &digest);
-                                let weight = (content.length() as u64/o.value) as u32;
-                                let key = ContentKey::new(&digest[..], weight);
+                                let key = ContentKey::new(&digest[..]);
                                 for (_, i) in &mut self.iblts {
                                     i.insert(&key);
                                 }

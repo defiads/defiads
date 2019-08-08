@@ -15,13 +15,14 @@
 //
 
 //! P2P messages
-use crate::bitcoin_hashes::sha256d;
+use crate::bitcoin_hashes::{sha256, sha256d};
 use murmel::p2p::{Command, Version, VersionCarrier};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::io;
 use crate::error::BiadNetError;
 use crate::iblt::IBLT;
 use crate::content::ContentKey;
+use crate::content::Content;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Envelope {
@@ -35,7 +36,9 @@ impl Command for Envelope {
             Message::Version(_) => "version",
             Message::Verack => "verack",
             Message::PollContent(_) => "poll content",
-            Message::IBLT(_) => "iblt"
+            Message::IBLT(_,_) => "iblt",
+            Message::Get(_) => "get",
+            Message::Content(_) => "content"
         }.to_string()
     }
 }
@@ -46,7 +49,9 @@ pub enum Message {
     Version(VersionMessage),
     Verack,
     PollContent(PollContentMessage),
-    IBLT(IBLT<ContentKey>)
+    IBLT(sha256d::Hash, IBLT<ContentKey>),
+    Get(Vec<sha256::Hash>),
+    Content(Content)
 }
 
 impl Version for Message {

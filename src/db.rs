@@ -110,7 +110,7 @@ impl<'db> TX<'db> {
         for r in query.query_map::<(String, u32),&[&ToSql],_>(NO_PARAMS,
                                                               |r| Ok((r.get(0)?,r.get(1)?)))? {
             if let Ok((id, weight)) = r {
-                iblt.insert(&ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..], weight));
+                iblt.insert(&ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..]));
             }
         }
         Ok(iblt)
@@ -118,12 +118,12 @@ impl<'db> TX<'db> {
 
     pub fn compute_min_sketch (&mut self, len: usize) -> Result<(Vec<u64>, Vec<(u64, u64)>, u32), BiadNetError> {
         let mut query = self.tx.prepare(r#"
-            select id, weight from content
+            select id from content
         "#)?;
-        let mut key_iterator = query.query_map::<(String, u32),&[&ToSql],_>(NO_PARAMS,
-                                                     |r| Ok((r.get(0)?,r.get(1)?)))?
-            .filter_map(|r| if let Ok((id, weight)) = r {
-                Some(ContentKey::new(&sha256::Hash::from_hex(id.as_str()).unwrap()[..], weight))}else{None});
+        let mut key_iterator = query.query_map::<String,&[&ToSql],_>(NO_PARAMS,
+                                                     |r| Ok(r.get(0)?))?
+            .filter_map(|r| if let Ok(id) = r {
+                Some(ContentKey::new(&sha256::Hash::from_hex(id.as_str()).unwrap()[..]))}else{None});
 
         Ok(min_sketch(len, K0, K1, &mut key_iterator))
     }
@@ -145,9 +145,23 @@ impl<'db> TX<'db> {
         )?)
     }
 
+    pub fn read_content(&self, digest: &sha256::Hash) -> Result<Option<Content>, BiadNetError> {
+        Ok(self.tx.query_row(r#"
+            select (ad, proof, publisher, term)
+            from content where id = ?1
+        "#, &[digest.to_hex()], |r| Ok(
+            Some(Content {
+                ad: serde_cbor::from_reader(std::io::Cursor::new(r.get_unwrap::<usize, Vec<u8>>(0))).unwrap(),
+                funding: serde_cbor::from_reader(std::io::Cursor::new(r.get_unwrap::<usize, Vec<u8>>(1))).unwrap(),
+                funder: serde_cbor::from_reader(std::io::Cursor::new(r.get_unwrap::<usize, Vec<u8>>(2))).unwrap(),
+                term: r.get_unwrap(3)
+            })
+        ))?)
+    }
+
     pub fn truncate_content(&mut self, limit: u64) -> Result<Vec<ContentKey>, BiadNetError> {
         let mut statement = self.tx.prepare(r#"
-            select id, length, weight from content order by weight desc
+            select id, length from content order by weight desc
         "#)?;
 
         let mut to_delete = Vec::new();
@@ -155,18 +169,17 @@ impl<'db> TX<'db> {
         for result in statement.query_map(NO_PARAMS,
                                                 |r|
                                                     Ok((r.get_unwrap::<usize, String>(0),
-                                                        r.get_unwrap::<usize, i64>(1),
-                                                        r.get_unwrap::<usize, u32>(2))))? {
-            if let Ok((id, length, weight)) = result {
+                                                        r.get_unwrap::<usize, i64>(1))))? {
+            if let Ok((id, length)) = result {
                 size += length as u64;
                 if size > limit {
-                    to_delete.push((id, weight));
+                    to_delete.push(id);
                 }
             }
         }
         let mut keys = Vec::new();
-        for (id, weight) in &to_delete {
-            keys.push(ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..], *weight));
+        for id in &to_delete {
+            keys.push(ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..]));
             debug!("drop content due to strorage limit {}", id);
             self.tx.execute(r#"
                 delete from content where id = ?1
@@ -187,13 +200,13 @@ impl<'db> TX<'db> {
         "#, &[&height as &ToSql])?;
 
         let mut query = self.tx.prepare(r#"
-            select id, weight from content where id in (select id from temp.ids)
+            select id from temp.ids
         "#)?;
 
-        for r in query.query_map::<(String, u32),&[&ToSql],_>(NO_PARAMS,
-                                                               |r| Ok((r.get(0)?,r.get(1)?)))? {
-            if let Ok((id, weight)) = r {
-                keys.push(ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..], weight));
+        for r in query.query_map::<String,&[&ToSql],_>(NO_PARAMS,
+                                                               |r| Ok(r.get(0)?))? {
+            if let Ok(id) = r {
+                keys.push(ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..]));
             }
         }
 
@@ -229,13 +242,13 @@ impl<'db> TX<'db> {
         "#, &[&block_id.to_hex() as &ToSql])?;
 
         let mut query = self.tx.prepare(r#"
-            select id, weight from content where id in (select id from temp.ids)
+            select id from temp.ids
         "#)?;
 
-        for r in query.query_map::<(String, u32),&[&ToSql],_>(NO_PARAMS,
-                                                              |r| Ok((r.get(0)?,r.get(1)?)))? {
-            if let Ok((id, weight)) = r {
-                keys.push(ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..], weight));
+        for r in query.query_map::<String,&[&ToSql],_>(NO_PARAMS,
+                                                              |r| Ok(r.get(0)?))? {
+            if let Ok(id) = r {
+                keys.push(ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..]));
             }
         }
 

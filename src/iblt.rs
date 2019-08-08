@@ -83,8 +83,8 @@ impl<K : IBLTKey> IBLT<K> {
             ksequence: generate_ksequence(k, k0, k1)}
     }
 
-    pub fn len(&self) -> usize {
-        self.buckets.len()
+    pub fn len(&self) -> u32 {
+        self.buckets.len() as u32
     }
 
     fn keyhash(&self, key: &K) -> u64 {
@@ -336,16 +336,16 @@ mod test {
     pub fn test_single_insert () {
         let mut a = IBLT::new(10, 3, 0, 0);
 
-        a.insert(&ContentKey::new(&[1; ID_LEN], 0));
-        assert_eq!(a.iter().next().unwrap().unwrap(), IBLTEntry::Inserted(ContentKey::new(&[1; ID_LEN], 0)));
+        a.insert(&ContentKey::new(&[1; ID_LEN]));
+        assert_eq!(a.iter().next().unwrap().unwrap(), IBLTEntry::Inserted(ContentKey::new(&[1; ID_LEN])));
     }
 
     #[test]
     pub fn test_single_insert_delete () {
         let mut a = IBLT::new(10, 3, 0, 0);
 
-        a.insert(&ContentKey::new(&[1; ID_LEN],0));
-        a.delete(&ContentKey::new(&[1; ID_LEN],0));
+        a.insert(&ContentKey::new(&[1; ID_LEN]));
+        a.delete(&ContentKey::new(&[1; ID_LEN]));
         assert!(a.iter().next().is_none());
     }
 
@@ -356,7 +356,7 @@ mod test {
         let mut set = HashSet::new();
         for i in 0..20 {
             set.insert([i; ID_LEN]);
-            a.insert(&ContentKey::new(&[i; ID_LEN],0));
+            a.insert(&ContentKey::new(&[i; ID_LEN]));
         }
 
         for id in a.iter().map(|e| e.unwrap()) {
@@ -375,11 +375,11 @@ mod test {
         let mut removed = HashSet::new();
         for i in 0..20 {
             inserted.insert([i; ID_LEN]);
-            a.insert(&ContentKey::new(&[i; ID_LEN],0));
+            a.insert(&ContentKey::new(&[i; ID_LEN]));
         }
         for i in 10 .. 30 {
             removed.insert([i; ID_LEN]);
-            a.delete(&ContentKey::new(&[i; ID_LEN],0));
+            a.delete(&ContentKey::new(&[i; ID_LEN]));
         }
 
         let mut remained = inserted.difference(&removed).collect::<HashSet<_>>();
@@ -407,7 +407,7 @@ mod test {
         let mut a_inserted = HashSet::new();
         for i in 0..20 {
             a_inserted.insert([i; ID_LEN]);
-            a.insert(&ContentKey::new(&[i; ID_LEN], 0));
+            a.insert(&ContentKey::new(&[i; ID_LEN]));
         }
 
         let mut b = IBLT::new(60, 3, 0, 0);
@@ -415,7 +415,7 @@ mod test {
         let mut b_inserted = HashSet::new();
         for i in 15..30 {
             b_inserted.insert([i; ID_LEN]);
-            b.insert(&ContentKey::new(&[i; ID_LEN], 0));
+            b.insert(&ContentKey::new(&[i; ID_LEN]));
         }
         a.substract(&b);
         assert_eq!(a.iter().filter(|r| if let Ok(IBLTEntry::Inserted(_)) = r { true } else {false} ).count(), 15);
@@ -426,7 +426,7 @@ mod test {
     pub fn test_overload() {
         let mut a = IBLT::new(10, 5, 0, 0);
         for i in 0..20 {
-            a.insert(&ContentKey::new(&[i; ID_LEN], 0));
+            a.insert(&ContentKey::new(&[i; ID_LEN]));
         }
         assert!(a.into_iter().any(|r|  r.is_err()));
     }
@@ -444,10 +444,10 @@ mod test {
             let mut t = [0u8; 32];
             t.copy_from_slice(&id[..]);
             if i >= 200 {
-                a.insert(ContentKey::new(&t, 0));
+                a.insert(ContentKey::new(&t));
             }
             if i < 800 {
-                b.insert(ContentKey::new(&t, 0));
+                b.insert(ContentKey::new(&t));
             }
             id = sha256::Hash::hash(&t);
         }

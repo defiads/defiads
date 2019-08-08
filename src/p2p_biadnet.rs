@@ -364,7 +364,10 @@ impl AddressPoolMaintainer {
 
 #[derive(Eq, PartialEq, Hash, Debug)]
 pub enum ExpectedReply {
-    PollContent
+    PollContent,
+    IBLT,
+    Content,
+    Get
 }
 
 pub struct ChainDBTrunk {

@@ -38,14 +38,11 @@ const DIGEST_LEN: usize = secp256k1::constants::MESSAGE_SIZE;
 #[derive(Clone, Copy, Serialize, Deserialize, Hash, Default, Eq, PartialEq)]
 pub struct ContentKey {
     /// content digest
-    pub digest: [u8; DIGEST_LEN],
-    /// content length/funding
-    pub weight: u32
+    pub digest: [u8; DIGEST_LEN]
 }
 
 impl BitXorAssign for ContentKey {
     fn bitxor_assign(&mut self, rhs: ContentKey) {
-        self.weight ^= rhs.weight;
         self.digest.iter_mut().zip(rhs.digest.iter()).for_each(|(a, b)| *a ^= b);
     }
 }
@@ -53,31 +50,28 @@ impl BitXorAssign for ContentKey {
 impl IBLTKey for ContentKey {
     fn hash_to_u64_with_keys(&self, k0: u64, k1: u64) -> u64 {
         let mut hasher = siphasher::sip::SipHasher::new_with_keys(k0, k1);
-        let mut buf = [0u8; 4];
-        LittleEndian::write_u32(&mut buf, self.weight);
         hasher.write(&self.digest[..]);
-        hasher.write(&buf);
         hasher.finish()
     }
 }
 
 impl fmt::Debug for ContentKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f, "ContentKey{{digest: {} weight: {}}} ", self.digest.to_hex(), self.weight)
+        write!(f, "ContentKey{{digest: {}}} ", self.digest.to_hex())
     }
 }
 
 impl ContentKey {
-    pub fn new (hash: &[u8], weight: u32) -> ContentKey {
+    pub fn new (hash: &[u8]) -> ContentKey {
         assert_eq!(hash.len(), DIGEST_LEN);
         let mut digest = [0u8; DIGEST_LEN];
         digest.copy_from_slice(&hash[..]);
-        ContentKey{digest, weight }
+        ContentKey{digest}
     }
 }
 
 /// replicated content
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Content {
     /// content ad
     pub ad: Ad,
