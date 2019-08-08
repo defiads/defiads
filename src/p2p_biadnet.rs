@@ -180,14 +180,13 @@ pub struct P2PBiadNet {
     connections: usize,
     peers: Vec<SocketAddr>,
     listen: Vec<SocketAddr>,
-    chaindb: SharedChainDB,
     db: SharedDB,
     content_store: SharedContentStore
 }
 
 impl P2PBiadNet {
-    pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>, chaindb: SharedChainDB, db: SharedDB, content_store: SharedContentStore) -> P2PBiadNet {
-        P2PBiadNet {connections, peers, listen, chaindb, db, content_store}
+    pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>, db: SharedDB, content_store: SharedContentStore) -> P2PBiadNet {
+        P2PBiadNet {connections, peers, listen, db, content_store}
     }
     pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);

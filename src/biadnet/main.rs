@@ -82,7 +82,7 @@ pub fn main () {
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
     P2PBitcoin::new(bitcoin_network, bitcoin_connections, bitcoin_peers, chaindb.clone(), db.clone(),
                     content_store.clone()).start(&mut thread_pool);
-    P2PBiadNet::new(biadnet_connections, biadnet_peers, biadnet_listen, chaindb.clone(), db.clone(),
+    P2PBiadNet::new(biadnet_connections, biadnet_peers, biadnet_listen, db.clone(),
                     content_store.clone()).start(&mut thread_pool);
     thread_pool.run::<Empty<(), Never>>(future::empty()).unwrap();
 }
