@@ -309,7 +309,9 @@ impl P2PBiadNet {
                     let eligible = self.dns.iter().filter(|a| !self.earlier.contains(a)).cloned().collect::<Vec<_>>();
                     if eligible.len() > 0 {
                         let mut rng = thread_rng();
-                        return Some(eligible[(rng.next_u32() as usize) % eligible.len()]);
+                        let choice = eligible[(rng.next_u32() as usize) % eligible.len()];
+                        self.earlier.insert(choice.clone());
+                        return Some(choice);
                     }
                 }
                 None
