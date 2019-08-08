@@ -30,9 +30,11 @@ use murmel::p2p::PeerId;
 use std::collections::HashMap;
 use crate::iblt::estimate_diff_size;
 use crate::iblt::IBLTEntry;
+use std::time::SystemTime;
 
 const MINIMUM_IBLT_SIZE: u32 = 100;
 const MAXIMUM_IBLT_SIZE: u32 = MINIMUM_IBLT_SIZE << 16;
+const POLL_FREQUENCY: u64 = 60; // every minute
 
 pub struct Updater {
     p2p: P2PControlSender<Message>,
@@ -53,12 +55,14 @@ impl Updater {
     }
 
     fn run(&mut self, receiver: PeerMessageReceiver<Message>) {
+        let mut last_polled = SystemTime::now();
         loop {
             while let Ok(msg) = receiver.recv_timeout(Duration::from_millis(1000)) {
                 match msg {
                     PeerMessage::Connected(pid, _) => {
                         debug!("content poll peer={}", pid);
-                        self.poll_content(pid)
+                        self.poll_content(pid);
+                        last_polled = SystemTime::now();
                     },
                     PeerMessage::Disconnected(pid,_) => {
                         self.poll_asked.remove(&pid);
@@ -87,6 +91,9 @@ impl Updater {
                                                 self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::IBLT);
                                                 self.p2p.send_network(pid, Message::IBLT(our_tip, iblt));
                                             }
+                                        }
+                                        else {
+                                            debug!("not at same height with peer={}", pid);
                                         }
                                     }
                                     else {
@@ -169,6 +176,21 @@ impl Updater {
                 }
             }
             self.timeout.lock().unwrap().check(vec!(ExpectedReply::PollContent, ExpectedReply::IBLT, ExpectedReply::Content, ExpectedReply::Get));
+            if SystemTime::now().duration_since(last_polled).unwrap().as_secs() > POLL_FREQUENCY {
+                last_polled = SystemTime::now();
+                let store = self.store.read().unwrap();
+                if let Some(tip) = store.get_tip() {
+                    let sketch = store.get_sketch().clone();
+                    let poll = PollContentMessage {
+                        tip,
+                        sketch,
+                        size: store.get_nkeys()
+                    };
+                    let pid = self.p2p.send_random_network(Message::PollContent(poll.clone()));
+                    self.poll_asked.insert(pid, poll);
+                    self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::PollContent);
+                }
+            }
         }
     }
 
