@@ -32,12 +32,16 @@ use serde_cbor;
 use rusqlite::NO_PARAMS;
 use crate::iblt::IBLT;
 use crate::content::ContentKey;
-use crate::byteorder::ByteOrder;
-use std::io::Cursor;
-use crate::iblt::IBLTKey;
-use byteorder::LittleEndian;
+use crate::iblt::min_sketch;
 
 pub type SharedDB = Arc<Mutex<DB>>;
+
+// number of hash functions
+const NH:usize = 4;
+// random, I swear
+const K0:u64 = 1614418600579272000;
+const K1:u64 = 8727507265883984962;
+
 
 pub struct DB {
     connection: Connection
@@ -98,12 +102,6 @@ impl<'db> TX<'db> {
     }
 
     pub fn compute_iblt (&mut self, len: usize) -> Result<IBLT<ContentKey>, BiadNetError> {
-        // number of hash functions
-        const NH:usize = 4;
-        // random, I swear
-        const K0:u64 = 1614418600579272000;
-        const K1:u64 = 8727507265883984962;
-
         let mut iblt = IBLT::new(len, NH, K0, K1);
 
         let mut query = self.tx.prepare(r#"
@@ -116,6 +114,18 @@ impl<'db> TX<'db> {
             }
         }
         Ok(iblt)
+    }
+
+    pub fn compute_min_sketch (&mut self, len: usize) -> Result<(Vec<u64>, Vec<(u64, u64)>), BiadNetError> {
+        let mut query = self.tx.prepare(r#"
+            select id, weight from content
+        "#)?;
+        let mut key_iterator = query.query_map::<(String, u32),&[&ToSql],_>(NO_PARAMS,
+                                                     |r| Ok((r.get(0)?,r.get(1)?)))?
+            .filter_map(|r| if let Ok((id, weight)) = r {
+                Some(ContentKey::new(&sha256::Hash::from_hex(id.as_str()).unwrap()[..], weight))}else{None});
+
+        Ok(min_sketch(len, K0, K1, &mut key_iterator))
     }
 
     pub fn store_content(&mut self, height: u32, block_id: &sha256d::Hash, c: &Content, amount: u64) -> Result<usize, BiadNetError> {
@@ -172,7 +182,7 @@ impl<'db> TX<'db> {
                 id text
             );
         "#, NO_PARAMS)?;
-        let n = self.tx.execute(r#"
+        self.tx.execute(r#"
             insert into temp.ids (id) select id from content where height + term <= ?1
         "#, &[&height as &ToSql])?;
 
@@ -214,7 +224,7 @@ impl<'db> TX<'db> {
                 id text
             );
         "#, NO_PARAMS)?;
-        let n = self.tx.execute(r#"
+        self.tx.execute(r#"
             insert into temp.ids (id) select id from content where block_id = ?1
         "#, &[&block_id.to_hex() as &ToSql])?;
 

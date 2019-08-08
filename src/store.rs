@@ -27,9 +27,11 @@ use crate::funding::funding_script;
 use crate::db::SharedDB;
 use crate::iblt::IBLT;
 use crate::content::ContentKey;
-use rand::{RngCore, thread_rng};
 
 use std::collections::HashMap;
+use crate::iblt::add_to_min_sketch;
+
+const MIN_SKETCH_SIZE: usize = 20;
 
 pub type SharedContentStore = Arc<RwLock<ContentStore>>;
 
@@ -39,30 +41,50 @@ pub struct ContentStore {
     trunk: Arc<dyn Trunk + Send + Sync>,
     db: SharedDB,
     storage_limit: u64,
-    iblts: HashMap<u32, IBLT<ContentKey>>
+    iblts: HashMap<u32, IBLT<ContentKey>>,
+    min_sketch: Vec<u64>,
+    ksequence: Vec<(u64, u64)>
 }
 
 impl ContentStore {
     /// new content store
     pub fn new(db: SharedDB, storage_limit: u64, trunk: Arc<dyn Trunk + Send + Sync>) -> Result<ContentStore, BiadNetError> {
+        let mut mins;
+        let ksequence;
+        {
+            let mut db = db.lock().unwrap();
+            let mut tx = db.transaction();
+            let (m, k) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
+            mins = m;
+            ksequence = k;
+        }
         Ok(ContentStore {
             ctx: Secp256k1::new(),
             trunk,
             db,
             storage_limit,
-            iblts: HashMap::new()
+            iblts: HashMap::new(),
+            min_sketch: mins,
+            ksequence
         })
     }
 
     /// add a header to the tip of the chain
     pub fn add_header(&mut self, height: u32, header: &BlockHeader) -> Result<(), BiadNetError> {
         info!("new chain tip {}", header.bitcoin_hash());
+        let mut deleted_some = false;
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         for key in &mut tx.delete_expired(height)? {
             for (_, i) in &mut self.iblts {
                 i.delete(key);
+                deleted_some = true;
             }
+        }
+        if deleted_some {
+            let (m, k) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
+            self.min_sketch = m;
+            self.ksequence = k;
         }
         tx.commit();
         Ok(())
@@ -71,24 +93,38 @@ impl ContentStore {
     /// unwind the tip
     pub fn unwind_tip(&mut self, header: &BlockHeader) -> Result<(), BiadNetError> {
         info!("unwind tip {}", header.bitcoin_hash());
+        let mut deleted_some = false;
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         for key in &mut tx.delete_confirmed(&header.bitcoin_hash())? {
             for (_, i) in &mut self.iblts {
                 i.delete(key);
+                deleted_some = true;
             }
+        }
+        if deleted_some {
+            let (m, k) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
+            self.min_sketch = m;
+            self.ksequence = k;
         }
         tx.commit();
         return Ok(())
     }
 
     pub fn truncate_to_limit(&mut self) -> Result<(), BiadNetError> {
+        let mut deleted_some = false;
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         for key in &mut tx.truncate_content(self.storage_limit)? {
             for (_, i) in &mut self.iblts {
                 i.delete(key);
+                deleted_some = true;
             }
+        }
+        if deleted_some {
+            let (m, k) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
+            self.min_sketch = m;
+            self.ksequence = k;
         }
         tx.commit();
         return Ok(())
@@ -114,9 +150,11 @@ impl ContentStore {
                                 // ok there is a commitment to this ad
                                 info!("add content {}", &digest);
                                 let weight = (content.length() as u64/o.value) as u32;
+                                let key = ContentKey::new(&digest[..], weight);
                                 for (_, i) in &mut self.iblts {
-                                    i.insert(&ContentKey::new(&digest[..], weight));
+                                    i.insert(&key);
                                 }
+                                add_to_min_sketch(&mut self.min_sketch, &key, &self.ksequence);
                                 {
                                     let mut db = self.db.lock().unwrap();
                                     let mut tx = db.transaction();
