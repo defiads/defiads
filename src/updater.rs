@@ -89,7 +89,11 @@ impl Updater {
                                                 }
                                                 let iblt = store.get_iblt(size).expect("could not compute IBLT").clone();
                                                 self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::IBLT);
+                                                debug!("ask IBLT of size {} from peer={}", size, pid);
                                                 self.p2p.send_network(pid, Message::IBLT(our_tip, iblt));
+                                            }
+                                            else {
+                                                debug!("in sync with peer={}", pid);
                                             }
                                         }
                                         else {
@@ -187,6 +191,7 @@ impl Updater {
                         size: store.get_nkeys()
                     };
                     let pid = self.p2p.send_random_network(Message::PollContent(poll.clone()));
+                    debug!("polling for content peer={}", pid);
                     self.poll_asked.insert(pid, poll);
                     self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::PollContent);
                 }
