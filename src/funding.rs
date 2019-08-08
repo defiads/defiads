@@ -37,10 +37,11 @@ pub fn funding_script (funder: &PublicKey, digest: &sha256::Hash, term: u16, ctx
     LittleEndian::write_u32(&mut buf, term as u32 | (1 << 22));
 
     let script = Builder::new()
-        .push_slice(tweaked.to_bytes().as_slice())
-        .push_opcode(all::OP_CHECKSIGVERIFY)
         .push_slice(&buf[0..3])
         .push_opcode(all::OP_NOP3) // OP_CHECKSEQUENCEVERIFY
+        .push_opcode(all::OP_DROP)
+        .push_slice(tweaked.to_bytes().as_slice())
+        .push_opcode(all::OP_CHECKSIGVERIFY)
         .into_script();
 
     Address::p2wsh(&script, Network::Bitcoin).script_pubkey()
