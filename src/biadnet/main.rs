@@ -100,6 +100,7 @@ struct CommandLine {
 }
 
 impl CommandLine {
+    #[allow(unused)]
     pub fn has_opt (&self, opt: &str) -> bool {
         self.options.contains_key(&opt.to_string())
     }

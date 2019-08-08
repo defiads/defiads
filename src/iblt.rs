@@ -141,6 +141,7 @@ impl<K : IBLTKey> IBLT<K> {
         }
     }
 
+    #[cfg(test)]
     fn sync<S: IBLTKeySet<K>>(&self, other: &IBLT<K>, set: &mut S) -> Result<(), Box<dyn Error>> {
         let mut copy = self.clone();
         copy.substract(other);

@@ -87,6 +87,9 @@ impl Updater {
                                             self.p2p.send_network(pid, Message::IBLT(our_tip, iblt));
                                         }
                                     }
+                                    else {
+                                        debug!("not at same height with peer={}", pid);
+                                    }
                                 }
                                 else {
                                     // this is initial request
@@ -124,6 +127,9 @@ impl Updater {
                                             self.timeout.lock().unwrap().expect(pid, len, ExpectedReply::Content);
                                             self.p2p.send_network(pid, Message::Get(request));
                                         }
+                                    }
+                                    else {
+                                        debug!("not at same height with peer={}", pid);
                                     }
                                 }
                             },
