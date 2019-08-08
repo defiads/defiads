@@ -55,6 +55,8 @@ use crate::store::SharedContentStore;
 use murmel::p2p::P2PControlSender;
 use murmel::p2p::PeerMessageReceiver;
 use murmel::p2p::PeerMessage;
+use std::collections::HashMap;
+use murmel::p2p::PeerId;
 
 const MAGIC: u32 = 0xB1AD;
 const MAX_PROTOCOL_VERSION: u32 = 1;
@@ -314,14 +316,14 @@ impl P2PBiadNet {
 }
 
 struct AddressPoolMaintainer {
-    p2p: P2PControlSender<Message>,
-    db: SharedDB
+    db: SharedDB,
+    addresses: HashMap<PeerId, SocketAddr>
 }
 
 impl AddressPoolMaintainer {
     pub fn new(p2p: P2PControlSender<Message>, db: SharedDB) -> PeerMessageSender<Message>  {
         let (sender, receiver) = mpsc::sync_channel(p2p.back_pressure);
-        let mut m = AddressPoolMaintainer { p2p, db };
+        let mut m = AddressPoolMaintainer { db, addresses: HashMap::new() };
 
         thread::Builder::new().name("address pool".to_string()).spawn(move || { m.run(receiver) }).unwrap();
 
@@ -331,8 +333,9 @@ impl AddressPoolMaintainer {
     fn run(&mut self, receiver: PeerMessageReceiver<Message>) {
         while let Ok(msg) = receiver.recv () {
             match msg {
-                PeerMessage::Connected(pid) => {
-                    if let Some(address) = self.p2p.peer_address(pid) {
+                PeerMessage::Connected(pid, addr) => {
+                    if let Some(address) = addr {
+                        self.addresses.insert(pid, address);
                         let mut db = self.db.lock().unwrap();
                         let mut tx = db.transaction();
                         debug!("store successful connection to {} peer={}", &address, pid);
@@ -344,7 +347,7 @@ impl AddressPoolMaintainer {
                 }
                 PeerMessage::Disconnected(pid, banned) => {
                     if banned {
-                        if let Some(address) = self.p2p.peer_address(pid) {
+                        if let Some(address) = self.addresses.remove(&pid) {
                             let mut db = self.db.lock().unwrap();
                             let mut tx = db.transaction();
                             let now = SystemTime::now().duration_since(

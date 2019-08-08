@@ -56,7 +56,7 @@ impl Updater {
         loop {
             while let Ok(msg) = receiver.recv_timeout(Duration::from_millis(1000)) {
                 match msg {
-                    PeerMessage::Connected(pid) => {
+                    PeerMessage::Connected(pid, _) => {
                         debug!("content poll peer={}", pid);
                         self.poll_content(pid)
                     },
