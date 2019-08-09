@@ -38,6 +38,8 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::{Arc,RwLock, Mutex};
+use std::thread;
+use biadne::api::start_api;
 
 pub const STORAGE_LIMIT: u64 = 2^20;
 
@@ -78,6 +80,8 @@ pub fn main () {
         Arc::new(RwLock::new(ContentStore::new(db.clone(), storage_limit,
                                                Arc::new(ChainDBTrunk{chaindb: chaindb.clone()}))
             .expect("can not initialize content store")));
+
+    thread::Builder::new().name("http".to_string()).spawn(|| start_api()).expect("can not start http api");
 
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
     P2PBitcoin::new(bitcoin_network, bitcoin_connections, bitcoin_peers, chaindb.clone(), db.clone(),
