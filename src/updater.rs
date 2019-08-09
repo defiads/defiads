@@ -190,10 +190,14 @@ impl Updater {
                         sketch,
                         size: store.get_nkeys()
                     };
-                    let pid = self.p2p.send_random_network(Message::PollContent(poll.clone()));
-                    debug!("polling for content peer={}", pid);
-                    self.poll_asked.insert(pid, poll);
-                    self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::PollContent);
+                    if let Some(pid) = self.p2p.send_random_network(Message::PollContent(poll.clone())) {
+                        debug!("polling for content peer={}", pid);
+                        self.poll_asked.insert(pid, poll);
+                        self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::PollContent);
+                    }
+                    else {
+                        warn!("can not poll content as no biadnet peers are connected");
+                    }
                 }
             }
         }

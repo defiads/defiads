@@ -17,7 +17,7 @@
 
 use std::net::{SocketAddr, ToSocketAddrs};
 
-pub const BIADNET_PORT: u16 = 8444;
+pub const BIADNET_PORT: u16 = 21766;
 
 const SEEDER: [&str;1] = ["biad.network"];
 

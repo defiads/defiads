@@ -42,6 +42,7 @@ use std::thread;
 use biadne::api::start_api;
 
 pub const STORAGE_LIMIT: u64 = 2^20;
+const HTTP_RPC: &str = "127.0.0.1:21767";
 
 pub fn main () {
     let cmd = CommandLine::new();
@@ -56,6 +57,7 @@ pub fn main () {
 
     let biadnet_peers = get_socket_vec(cmd.opt_arg("biadnet-peers")).unwrap_or(Vec::new());
     let bitcoin_peers = get_socket_vec(cmd.opt_arg("bitcoin-peers")).unwrap_or(Vec::new());
+    let http_rpc = get_socket_vec(Some(cmd.opt_arg("http-rpc").unwrap_or(HTTP_RPC.to_string())));
 
     let biadnet_listen = get_socket_vec(
         Some(cmd.opt_arg("listen").unwrap_or (("0.0.0.0".to_string() + ":") + BIADNET_PORT.to_string().as_str())))
@@ -81,7 +83,14 @@ pub fn main () {
                                                Arc::new(ChainDBTrunk{chaindb: chaindb.clone()}))
             .expect("can not initialize content store")));
 
-    thread::Builder::new().name("http".to_string()).spawn(|| start_api()).expect("can not start http api");
+    if let Some(http) = http_rpc {
+        if !http.is_empty() {
+            let address = http[0].clone();
+            let store = content_store.clone();
+            thread::Builder::new().name("http".to_string()).spawn(
+                move || start_api(&address, store)).expect("can not start http api");
+        }
+    }
 
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
     P2PBitcoin::new(bitcoin_network, bitcoin_connections, bitcoin_peers, chaindb.clone(), db.clone(),
