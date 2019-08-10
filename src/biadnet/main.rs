@@ -15,7 +15,9 @@
 //
 
 #[macro_use]extern crate log;
+#[macro_use]extern crate serde_derive;
 extern crate clap;
+extern crate toml;
 use clap::{Arg, App, SubCommand};
 
 use simple_logger;
@@ -42,8 +44,19 @@ use std::str::FromStr;
 use std::sync::{Arc,RwLock, Mutex};
 use std::thread;
 use biadne::api::start_api;
+use std::fs;
+use std::time::SystemTime;
+use std::alloc::System;
+use rand::{thread_rng, RngCore};
+
 
 const HTTP_RPC: &str = "127.0.0.1:21767";
+
+#[derive(Serialize, Deserialize)]
+struct Config {
+    birth: u64,
+    api_key: String
+}
 
 pub fn main () {
     let listen_default = ("0.0.0.0".to_string() + ":") + BIADNET_PORT.to_string().as_str();
@@ -116,11 +129,33 @@ pub fn main () {
             .long("storage-limit")
             .help("Storage limit in GB")
             .takes_value(true)
-            .default_value("1")).get_matches();
+            .default_value("1"))
+        .arg(Arg::with_name("config")
+            .value_name("FILE")
+            .long("config")
+            .help("Configuration file in .toml format")
+            .takes_value(true)
+            .default_value("biadnet.toml")
+        ).get_matches();
 
     let level = Level::from_str(matches.value_of("log-level").unwrap()).unwrap();
     simple_logger::init_with_level(level).unwrap();
     info!("biadnet starting, with log-level {}", level);
+
+    let config_path = std::path::Path::new(matches.value_of("config").unwrap());
+    let config = if let Ok(config_string) = fs::read_to_string( config_path) {
+        toml::from_str::<Config>(config_string.as_str()).expect("can not parse config file")
+    } else {
+        let mut random = [0u8;10];
+        thread_rng().fill_bytes(&mut random);
+        let config = Config {
+            birth: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
+            api_key: hex::encode(random)
+        };
+        fs::write(config_path, toml::to_string(&config).unwrap()).expect("can not write config file");
+        config
+    };
+
 
     let bitcoin_network = matches.value_of("bitcoin-network").unwrap().parse::<Network>().unwrap();
     let biadnet_connections = matches.value_of("biadnet-connections").unwrap().parse::<usize>().unwrap();

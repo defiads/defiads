@@ -29,6 +29,5 @@ futures={ git= "https://github.com/tamasblummer/futures-rs.git", tag = "0.2.1" }
 rusqlite={version="0.20", features=["bundled"]}
 jsonrpc-http-server = "13.0"
 clap = "2.33"
-
-[dev-dependencies]
+toml="0.5"
 hex="0.3"

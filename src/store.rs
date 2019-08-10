@@ -97,7 +97,7 @@ impl ContentStore {
 
     /// add a header to the tip of the chain
     pub fn add_header(&mut self, height: u32, header: &BlockHeader) -> Result<(), BiadNetError> {
-        info!("new chain tip {}", header.bitcoin_hash());
+        info!("new chain tip at height {} {}", height, header.bitcoin_hash());
         let mut deleted_some = false;
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
