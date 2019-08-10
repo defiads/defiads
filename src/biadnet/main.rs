@@ -71,7 +71,7 @@ pub fn main () {
             .takes_value(true)
             .possible_values(&["OFF", "ERROR", "WARN", "INFO", "DEBUG", "TRACE"])
             .case_insensitive(true)
-            .default_value("INFO"))
+            .default_value("DEBUG"))
         .arg(Arg::with_name("bitcoin-network")
             .long("bitcoin-network")
             .value_name("NETWORK")
@@ -148,6 +148,7 @@ pub fn main () {
     let level = log::LevelFilter::from_str(matches.value_of("log-level").unwrap()).unwrap();
     simplelog::CombinedLogger::init(
         vec![
+            simplelog::TermLogger::new(log::LevelFilter::Info, simplelog::Config::default(), simplelog::TerminalMode::Mixed).unwrap(),
             simplelog::WriteLogger::new(level, simplelog::Config::default(), std::fs::File::create(matches.value_of("log-file").unwrap()).unwrap()),
         ]
     ).unwrap();
