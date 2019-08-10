@@ -18,6 +18,7 @@
 #[macro_use]extern crate serde_derive;
 extern crate clap;
 extern crate toml;
+extern crate base64;
 use clap::{Arg, App, SubCommand};
 
 use simple_logger;
@@ -48,14 +49,14 @@ use std::fs;
 use std::time::SystemTime;
 use std::alloc::System;
 use rand::{thread_rng, RngCore};
+use std::path::Path;
 
 
 const HTTP_RPC: &str = "127.0.0.1:21767";
 
 #[derive(Serialize, Deserialize)]
 struct Config {
-    birth: u64,
-    api_key: String
+    api_key: String,
 }
 
 pub fn main () {
@@ -135,27 +136,12 @@ pub fn main () {
             .long("config")
             .help("Configuration file in .toml format")
             .takes_value(true)
-            .default_value("biadnet.toml")
+            .default_value("biadnet.cfg")
         ).get_matches();
 
     let level = Level::from_str(matches.value_of("log-level").unwrap()).unwrap();
     simple_logger::init_with_level(level).unwrap();
     info!("biadnet starting, with log-level {}", level);
-
-    let config_path = std::path::Path::new(matches.value_of("config").unwrap());
-    let config = if let Ok(config_string) = fs::read_to_string( config_path) {
-        toml::from_str::<Config>(config_string.as_str()).expect("can not parse config file")
-    } else {
-        let mut random = [0u8;10];
-        thread_rng().fill_bytes(&mut random);
-        let config = Config {
-            birth: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
-            api_key: hex::encode(random)
-        };
-        fs::write(config_path, toml::to_string(&config).unwrap()).expect("can not write config file");
-        config
-    };
-
 
     let bitcoin_network = matches.value_of("bitcoin-network").unwrap().parse::<Network>().unwrap();
     let biadnet_connections = matches.value_of("biadnet-connections").unwrap().parse::<usize>().unwrap();
@@ -174,17 +160,31 @@ pub fn main () {
     let db_name = matches.value_of("db").unwrap();
     let db_path = std::path::Path::new(db_name);
 
+    let storage_limit = matches.value_of("storage-limit").unwrap().parse::<u64>().expect("expecting number of GB") * 1000*1000;
+
     let mut chaindb = ChainDB::new(db_path, bitcoin_network, 0).expect("can not open chain db");
     chaindb.init(false).expect("can not initialize db");
     let chaindb = Arc::new(RwLock::new(chaindb));
 
-    let storage_limit = matches.value_of("storage-limit").unwrap().parse::<u64>().expect("expecting number of GB") * 1000*1000;
 
     let mut db = DB::new(db_path).expect("can not open db");
     let mut tx = db.transaction();
     tx.create_tables();
     tx.commit();
     let db = Arc::new(Mutex::new(db));
+
+    let config_path = std::path::Path::new(matches.value_of("config").unwrap());
+    let config = if let Ok(config_string) = fs::read_to_string( config_path) {
+        toml::from_str::<Config>(config_string.as_str()).expect("can not parse config file")
+    } else {
+        let mut random = [0u8;12];
+        thread_rng().fill_bytes(&mut random);
+        let config = Config {
+            api_key: base64::encode(&random)
+        };
+        fs::write(config_path, toml::to_string(&config).unwrap()).expect("can not write config file");
+        config
+    };
 
     let content_store =
         Arc::new(RwLock::new(ContentStore::new(db.clone(), storage_limit,

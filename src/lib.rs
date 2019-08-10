@@ -31,7 +31,7 @@ extern crate serde_cbor;
 extern crate serde_json;
 extern crate rand_distr;
 #[macro_use]extern crate serde_derive;
-extern crate hex;
+#[cfg(test)]extern crate hex;
 extern crate jsonrpc_http_server;
 extern crate bitcoin_hashes;
 extern crate bitcoin;
