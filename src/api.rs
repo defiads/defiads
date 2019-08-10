@@ -6,6 +6,29 @@ use futures::StreamExt;
 
 pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore) {
     let mut io = IoHandler::default();
+
+    // list known categories
+    // call with
+    // curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "categories", "id":1}'
+    // answer is:
+    // {"jsonrpc":"2.0","result":["category", ...],"id":1}
+    let moved_store = store.clone();
+    io.add_method("categories", move |_| {
+        match moved_store.read().unwrap().list_categories() {
+            Ok(result) => return Ok(serde_json::to_value(result).unwrap()),
+            Err(e) => {
+                debug!("failed to retrieve categories {:?}", e);
+                return Err(Error::internal_error());
+            }
+        };
+    });
+
+    // params is an array of categories
+    // call with
+    // curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "list", "params":["misc","other"], "id":1}'
+    // answer is:
+    // {"jsonrpc":"2.0","result":[["id","cat","abstract"]...],"id":1}
+    let moved_store = store.clone();
     io.add_method("list", move |p:Params| {
         let mut cats = Vec::new();
         match p {
@@ -19,7 +42,7 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore) {
             }
             _ => return Err(Error::invalid_params("expecting an array of categories"))
         };
-        match store.read().unwrap().list_abstracts(cats) {
+        match moved_store.read().unwrap().list_abstracts(cats) {
             Ok(result) => return Ok(serde_json::to_value(result).unwrap()),
             Err(e) => {
                 debug!("failed to retrieve abstracts {:?}", e);
@@ -27,6 +50,8 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore) {
             }
         };
     });
+
+
 
     let server = ServerBuilder::new(io)
         .start_http(rpc_address)

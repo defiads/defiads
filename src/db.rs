@@ -318,7 +318,20 @@ impl<'db> TX<'db> {
                 std::cmp::min(len-1, thread_rng().sample::<f64,_>(Poisson::new(len as f64 / 4.0).unwrap()) as usize)]))
     }
 
-    pub fn list_abstracts(&mut self, cats: Vec<String>) -> Result<Vec<(String, String)>, BiadNetError> {
+    pub fn list_categories(&mut self) -> Result<Vec<String>, BiadNetError> {
+        let mut statement = self.tx.prepare(r#"
+            select distinct cat from content order by cat
+        "#)?;
+
+        let result = statement.query_map(NO_PARAMS, |r| {
+            Ok(r.get_unwrap::<usize, String>(0))
+        })?.filter_map(|r| if let Ok(c) = r { Some(c) } else {None})
+            .collect::<Vec<_>>();
+
+        Ok(result)
+    }
+
+    pub fn list_abstracts(&mut self, cats: Vec<String>) -> Result<Vec<Vec<String>>, BiadNetError> {
         // mut &self because using temp table
         self.tx.execute(r#"
             create temp table cats (
@@ -331,12 +344,12 @@ impl<'db> TX<'db> {
             "#, &[c as &ToSql])?;
         }
         let mut statement = self.tx.prepare(r#"
-            select id, abs from content where cat in (select cat from temp.cats)
+            select id, cat, abs from content where cat in (select cat from temp.cats) order by cat, weight desc
         "#)?;
 
         let result = statement.query_map(NO_PARAMS, |r| {
-            Ok((r.get_unwrap::<usize, String>(0), r.get_unwrap::<usize, String>(1)))
-        })?.filter_map(|r| if let Ok(pair) = r { Some(pair) } else {None})
+            Ok((r.get_unwrap::<usize, String>(0), r.get_unwrap::<usize, String>(1), r.get_unwrap::<usize, String>(2)))
+        })?.filter_map(|r| if let Ok((i,c, a)) = r { Some(vec![i,c,a]) } else {None})
             .collect::<Vec<_>>();
 
         self.tx.execute(r#"
