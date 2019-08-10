@@ -24,13 +24,13 @@ siphasher="0.3"
 rand = "0.7"
 rand_distr = "0.2"
 log="0.4"
-simple_logger = "0.5"
 futures={ git= "https://github.com/tamasblummer/futures-rs.git", tag = "0.2.1" }
 rusqlite={version="0.20", features=["bundled"]}
 jsonrpc-http-server = "13.0"
 clap = "2.33"
 toml="0.5"
 base64="0.10"
+simplelog="0.6"
 
 [dev-dependencies]
 hex="0.3"

@@ -21,8 +21,8 @@ extern crate toml;
 extern crate base64;
 use clap::{Arg, App, SubCommand};
 
-use simple_logger;
 use log::Level;
+use simplelog;
 use std::env::args;
 
 use futures::{
@@ -136,11 +136,21 @@ pub fn main () {
             .long("config")
             .help("Configuration file in .toml format")
             .takes_value(true)
-            .default_value("biadnet.cfg")
+            .default_value("biadnet.cfg"))
+        .arg(Arg::with_name("log-file")
+            .value_name("FILE")
+            .long("log-file")
+            .help("Log file path.")
+            .takes_value(true)
+            .default_value("biadnet.log")
         ).get_matches();
 
-    let level = Level::from_str(matches.value_of("log-level").unwrap()).unwrap();
-    simple_logger::init_with_level(level).unwrap();
+    let level = log::LevelFilter::from_str(matches.value_of("log-level").unwrap()).unwrap();
+    simplelog::CombinedLogger::init(
+        vec![
+            simplelog::WriteLogger::new(level, simplelog::Config::default(), std::fs::File::create(matches.value_of("log-file").unwrap()).unwrap()),
+        ]
+    ).unwrap();
     info!("biadnet starting, with log-level {}", level);
 
     let bitcoin_network = matches.value_of("bitcoin-network").unwrap().parse::<Network>().unwrap();

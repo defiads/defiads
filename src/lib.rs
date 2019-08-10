@@ -41,7 +41,6 @@ extern crate secp256k1;
 extern crate rand;
 extern crate murmel;
 #[macro_use]extern crate log;
-extern crate simple_logger;
 extern crate rusqlite;
 
 mod error;
