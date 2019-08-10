@@ -414,6 +414,13 @@ impl Trunk for ChainDBTrunk {
         None
     }
 
+    fn get_header_for_height(&self, height: u32) -> Option<BlockHeader> {
+        if let Some(cached) = self.chaindb.read().unwrap().get_header_for_height(height) {
+            return Some(cached.stored.header.clone());
+        }
+        None
+    }
+
     fn get_height(&self, block_hash: &sha256d::Hash) -> Option<u32> {
         self.chaindb.read().unwrap().pos_on_trunk(block_hash)
     }

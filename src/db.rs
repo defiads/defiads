@@ -28,12 +28,15 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
 use rand::{thread_rng, Rng};
 use crate::content::Content;
+use crate::ad::Ad;
 use serde_cbor;
 use rusqlite::NO_PARAMS;
 use crate::iblt::IBLT;
 use crate::content::ContentKey;
 use crate::iblt::min_sketch;
 use rand_distr::Poisson;
+use crate::text::Text;
+use bitcoin::PublicKey;
 
 pub type SharedDB = Arc<Mutex<DB>>;
 
@@ -358,6 +361,57 @@ impl<'db> TX<'db> {
 
         Ok(result)
     }
+
+    pub fn retrieve_contents(&mut self, ids: Vec<String>) -> Result<Vec<RetrievedContent>, BiadNetError> {
+        // mut &self because using temp table
+        self.tx.execute(r#"
+            create temp table ids (
+                id text
+            );
+        "#, NO_PARAMS)?;
+        for id in &ids {
+            self.tx.execute(r#"
+                insert into temp.ids (id) values (?1)
+            "#, &[id as &ToSql]).unwrap();
+        }
+
+        let mut statement = self.tx.prepare(r#"
+            select id, cat, abs, ad, publisher, height, term, length, weight from content where id in (select id from temp.ids) order by weight desc
+        "#)?;
+
+        let result = statement.query_map(NO_PARAMS, |r| {
+            Ok(RetrievedContent{
+                id: r.get_unwrap::<usize, String>(0),
+                cat: r.get_unwrap::<usize, String>(1),
+                abs: r.get_unwrap::<usize, String>(2),
+                text: Text::from_encoded(r.get_unwrap::<usize, Vec<u8>>(3).as_slice()).as_string().unwrap(),
+                publisher: PublicKey::from_slice(r.get_unwrap::<usize, Vec<u8>>(4).as_slice()).unwrap().to_string(),
+                height: r.get_unwrap::<usize, u32>(5),
+                term: r.get_unwrap::<usize, u16>(6),
+                length: r.get_unwrap::<usize, u32>(7),
+                weight: r.get_unwrap::<usize, u32>(8)
+            })
+        })?.filter_map(|r| if let Ok(r) = r { Some(r) } else {None})
+            .collect::<Vec<_>>();
+
+        self.tx.execute(r#"
+            drop table temp.ids
+        "#, NO_PARAMS)?;
+        Ok(result)
+    }
+}
+
+
+pub struct RetrievedContent {
+    pub id: String,
+    pub cat: String,
+    pub abs: String,
+    pub text: String,
+    pub publisher: String,
+    pub height: u32,
+    pub term: u16,
+    pub length: u32,
+    pub weight: u32
 }
 
 #[cfg(test)]

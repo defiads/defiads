@@ -61,6 +61,10 @@ impl Text {
         Text{encoded}
     }
 
+    pub fn from_encoded(encoded: &[u8]) -> Text {
+        Text{encoded: encoded.to_vec()}
+    }
+
     /// return encoded storage
     pub fn as_bytes (&self) -> &[u8] {
         self.encoded.as_slice()

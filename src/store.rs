@@ -25,7 +25,7 @@ use std::sync::{RwLock, Arc};
 use crate::error::BiadNetError;
 use crate::content::Content;
 use crate::funding::funding_script;
-use crate::db::SharedDB;
+use crate::db::{SharedDB, RetrievedContent};
 use crate::iblt::IBLT;
 use crate::content::ContentKey;
 
@@ -216,5 +216,51 @@ impl ContentStore {
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         Ok(tx.list_abstracts(cats)?)
+    }
+
+    pub fn read_contents(&self, ids: Vec<String>) -> Result<Vec<Readable>, BiadNetError> {
+        let mut db = self.db.lock().unwrap();
+        let mut tx = db.transaction();
+        Ok(tx.retrieve_contents(ids)?.iter().map( |r| Readable::new(r, self.trunk.clone())).collect())
+    }
+}
+
+#[derive(Serialize, Clone)]
+pub struct Readable {
+    pub id: String,
+    pub cat: String,
+    pub abs: String,
+    pub text: String,
+    pub start: u64,
+    pub end: u64,
+    pub publisher: String,
+    pub height: u32,
+    pub term: u16,
+    pub length: u32,
+    pub weight: u32
+}
+
+impl Readable {
+    pub fn new(retrieved: &RetrievedContent, trunk: Arc<dyn Trunk>) -> Readable {
+        let start = trunk.get_header_for_height(retrieved.height).unwrap().time as u64;
+        let end = if let Some(header) = trunk.get_header_for_height(retrieved.height + retrieved.term as u32) {
+            header.time as u64
+        }
+        else {
+            start + (retrieved.term * 600) as u64
+        };
+        Readable {
+            id: retrieved.id.clone(),
+            cat: retrieved.cat.clone(),
+            abs: retrieved.abs.clone(),
+            text: retrieved.text.clone(),
+            start,
+            end,
+            publisher: retrieved.publisher.clone(),
+            height: retrieved.height,
+            term: retrieved.term,
+            length: retrieved.length,
+            weight: retrieved.weight
+        }
     }
 }
