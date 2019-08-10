@@ -4,16 +4,45 @@ use std::net::SocketAddr;
 use crate::store::SharedContentStore;
 use futures::StreamExt;
 
-pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore) {
+fn parse_arguments (p: Params, api_key: &str) -> Result<Vec<String>, Error> {
+    let mut result = Vec::new();
+    match p {
+        Params::Array(array) => {
+            for s in &array {
+                match s {
+                    Value::String(s) => result.push(s.clone()),
+                    _ => return Err(Error::invalid_params("expecting strings"))
+                }
+            }
+        }
+        _ => return Err(Error::invalid_params("expecting an array of strings"))
+    }
+    if result.len() < 1 {
+        return Err(Error::invalid_params("missing api key"));
+    }
+    if result [0].as_str() != api_key {
+        return Err(Error::invalid_params("invalid api key"));
+    }
+    return Ok(result[1..].to_vec());
+}
+
+pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore, apikey: String) {
     let mut io = IoHandler::default();
 
+    // call endpoints with:
+    // curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "METHOD", "params": ["apikey", "ARGUMENTS"...] "id":1}' 127.0.0.1:21767
+    // see biadnet.cfg for apikey
+
+
     // list known categories
-    // call with
-    // curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "categories", "id":1}' 127.0.0.1:21767
+    // METHOD: categories
+    // ARGUMENTS: none
     // answer is:
     // {"jsonrpc":"2.0","result":["category", ...],"id":1}
     let moved_store = store.clone();
-    io.add_method("categories", move |_| {
+    let moved_apikey = apikey.clone();
+    io.add_method("categories", move |p| {
+        parse_arguments(p,moved_apikey.as_str())?;
         match moved_store.read().unwrap().list_categories() {
             Ok(result) => return Ok(serde_json::to_value(result).unwrap()),
             Err(e) => {
@@ -24,25 +53,14 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore) {
     });
 
     // list ids and abstracts for categories
-    // params is an array of categories
-    // call with
-    // curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "list", "params":["misc","other"], "id":1}' 127.0.0.1:21767
+    // METHOD: list
+    // ARGUMENTS: "category", ...
     // answer is (ordered by category name and weight descending):
     // {"jsonrpc":"2.0","result":[["id","cat","abstract"]...],"id":1}
     let moved_store = store.clone();
+    let moved_apikey = apikey.clone();
     io.add_method("list", move |p:Params| {
-        let mut cats = Vec::new();
-        match p {
-            Params::Array(array) => {
-                for s in &array {
-                    match s {
-                        Value::String(s) => cats.push(s.clone()),
-                        _ => return Err(Error::invalid_params("expecting strings as categories"))
-                    }
-                }
-            }
-            _ => return Err(Error::invalid_params("expecting an array of categories"))
-        };
+        let cats = parse_arguments(p,moved_apikey.as_str())?;
         match moved_store.read().unwrap().list_abstracts(cats) {
             Ok(result) => return Ok(serde_json::to_value(result).unwrap()),
             Err(e) => {
@@ -53,25 +71,14 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore) {
     });
 
     // read content
-    // params is an array of content ids
-    // call with
-    // curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "read", "params":["id"...], "id":1}' 127.0.0.1:21767
+    // METHOD: read
+    // ARGUMENTS: "id", ...
     // answer is (ordered by category name and weight descending):
     // {"jsonrpc":"2.0","result":[{ content }...],"id":1}
     let moved_store = store.clone();
+    let moved_apikey = apikey.clone();
     io.add_method("read", move |p:Params| {
-        let mut ids = Vec::new();
-        match p {
-            Params::Array(array) => {
-                for s in &array {
-                    match s {
-                        Value::String(s) => ids.push(s.clone()),
-                        _ => return Err(Error::invalid_params("expecting string id to read"))
-                    }
-                }
-            }
-            _ => return Err(Error::invalid_params("expecting an array of ids"))
-        };
+        let ids = parse_arguments(p,moved_apikey.as_str())?;
         match moved_store.read().unwrap().read_contents(ids) {
             Ok(result) => return Ok(serde_json::to_value(result).unwrap()),
             Err(e) => {

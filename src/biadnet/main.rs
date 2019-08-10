@@ -56,7 +56,7 @@ const HTTP_RPC: &str = "127.0.0.1:21767";
 
 #[derive(Serialize, Deserialize)]
 struct Config {
-    api_key: String,
+    apikey: String,
 }
 
 pub fn main () {
@@ -180,7 +180,7 @@ pub fn main () {
         let mut random = [0u8;12];
         thread_rng().fill_bytes(&mut random);
         let config = Config {
-            api_key: base64::encode(&random)
+            apikey: base64::encode(&random)
         };
         fs::write(config_path, toml::to_string(&config).unwrap()).expect("can not write config file");
         config
@@ -195,7 +195,7 @@ pub fn main () {
         let address = http.clone();
         let store = content_store.clone();
         thread::Builder::new().name("http".to_string()).spawn(
-            move || start_api(&address, store)).expect("can not start http api");
+            move || start_api(&address, store, config.apikey)).expect("can not start http api");
     }
 
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
