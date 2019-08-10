@@ -60,6 +60,7 @@ use murmel::p2p::PeerId;
 use std::collections::HashMap;
 use std::time::Duration;
 use futures::task::Waker;
+use std::time::{UNIX_EPOCH};
 
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
@@ -108,13 +109,13 @@ impl P2PBitcoin {
 
         let downstream = Arc::new(Mutex::new(BitcoinDriver{store: self.content_store.clone()}));
 
-        dispatcher.add_listener(AddressPoolMaintainer::new(p2p_control.clone(), self.db.clone()));
+        dispatcher.add_listener(AddressPoolMaintainer::new(p2p_control.clone(), self.db.clone(), murmel::p2p::SERVICE_BLOCKS));
         dispatcher.add_listener(HeaderDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout.clone(), downstream));
         dispatcher.add_listener(Ping::new(p2p_control.clone(), timeout.clone()));
 
         let p2p2 = p2p.clone();
         let p2p_task = Box::new(future::poll_fn(move |ctx| {
-            p2p2.run("bitcoin", 0, ctx).unwrap();
+            p2p2.run("bitcoin", murmel::p2p::SERVICE_BLOCKS, ctx).unwrap();
             Ok(Async::Ready(()))
         }));
         // start the task that runs all network communication
@@ -124,7 +125,7 @@ impl P2PBitcoin {
         let waker = keep_connected.waker.clone();
         thread::Builder::new().name("bitcoin keep connected".to_string()).spawn(move ||
             {
-                thread::sleep(Duration::from_secs(30));
+                thread::sleep(Duration::from_secs(10));
                 let mut waker = waker.lock().unwrap();
                 if let Some(ref mut w) = *waker {
                     w.wake();
@@ -163,40 +164,36 @@ impl Future for KeepConnected {
     type Error = Never;
 
     fn poll(&mut self, cx: &mut task::Context) -> Poll<Self::Item, Self::Error> {
-        // return from this loop with 'pending' if enough peers are connected
-        loop {
-            while self.connections.len() < self.min_connections {
-                if let Some(addr) = self.get_an_address() {
-                    self.connections.push(self.p2p.add_peer("bitcoin", PeerSource::Outgoing(addr)));
-                }
-                else {
-                    warn!("no more bitcoin peers to connect");
-                    let mut waker = self.waker.lock().unwrap();
-                    *waker = Some(cx.waker().clone());
-                    return Ok(Async::Pending);
+        // find a finished peers
+        let finished = self.connections.iter_mut().enumerate().filter_map(|(i, c)| {
+            match c.poll(cx) {
+                Ok(Async::Pending) => None,
+                Ok(Async::Ready(address)) => {
+                    trace!("keep connected woke up to lost peer at {}", address);
+                    Some(i)
+                },
+                Err(e) => {
+                    trace!("keep connected woke up to error {:?}", e);
+                    Some(i)
                 }
             }
-            // find a finished peer
-            let finished = self.connections.iter_mut().enumerate().filter_map(|(i, f)| {
-                // if any of them finished
-                // note that poll is reusing context of this poll, so wakeups come here
-                match f.poll(cx) {
-                    Ok(Async::Pending) => None,
-                    Ok(Async::Ready(address)) => {
-                        trace!("keep connected woke up to lost peer at {}", address);
-                        Some((i, Ok(address)))
-                    }
-                    Err(e) => {
-                        trace!("keep connected woke up to error {:?}", e);
-                        Some((i, Err(e)))
-                    }
-                }
-            }).next();
-            match finished {
-                Some((i, _)) => {self.connections.remove(i);},
-                None => {}
-            };
+        }).collect::<Vec<_>>();
+        for (n, i) in finished.iter().enumerate() {
+            self.connections.remove(*i - n);
         }
+
+        while self.connections.len() < self.min_connections {
+            if let Some(addr) = self.get_an_address() {
+                self.connections.push(self.p2p.add_peer("bitcoin", PeerSource::Outgoing(addr)));
+            }
+            else {
+                warn!("no more bitcoin peers to connect");
+                break;
+            }
+        }
+        let mut waker = self.waker.lock().unwrap();
+        *waker = Some(cx.waker().clone());
+        return Ok(Async::Pending);
     }
 }
 
@@ -230,13 +227,14 @@ impl KeepConnected {
 
 struct AddressPoolMaintainer {
     db: SharedDB,
-    addresses: HashMap<PeerId, SocketAddr>
+    addresses: HashMap<PeerId, SocketAddr>,
+    needed_services: u64
 }
 
 impl AddressPoolMaintainer {
-    pub fn new(p2p: P2PControlSender<NetworkMessage>, db: SharedDB) -> PeerMessageSender<NetworkMessage>  {
+    pub fn new(p2p: P2PControlSender<NetworkMessage>, db: SharedDB, needed_services: u64) -> PeerMessageSender<NetworkMessage>  {
         let (sender, receiver) = mpsc::sync_channel(p2p.back_pressure);
-        let mut m = AddressPoolMaintainer { db, addresses: HashMap::new() };
+        let mut m = AddressPoolMaintainer { db, addresses: HashMap::new(), needed_services };
 
         thread::Builder::new().name("address pool".to_string()).spawn(move || { m.run(receiver) }).unwrap();
 
@@ -276,10 +274,13 @@ impl AddressPoolMaintainer {
                         NetworkMessage::Addr(av) => {
                             let mut db = self.db.lock().unwrap();
                             let mut tx = db.transaction();
-                            for a in &av {
-                                if let Ok(addr) = a.1.socket_addr() {
-                                    debug!("received and stored address {} peer={}", &addr, pid);
-                                    tx.store_address("bitcoin", &addr, a.0 as u64, 0).unwrap();
+                            for (last_seen, a) in &av {
+                                if (*last_seen as u64) < (SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs()) &&
+                                    a.services & self.needed_services == self.needed_services {
+                                    if let Ok(addr) = a.socket_addr() {
+                                        debug!("received and stored address {} peer={}", &addr, pid);
+                                        tx.store_address("bitcoin", &addr, *last_seen as u64, 0).unwrap();
+                                    }
                                 }
                             }
                             tx.commit();

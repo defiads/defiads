@@ -237,7 +237,7 @@ impl P2PBiadNet {
         let waker = keep_connected.waker.clone();
         thread::Builder::new().name("biadnet keep connected".to_string()).spawn(move ||
             {
-                thread::sleep(Duration::from_secs(30));
+                thread::sleep(Duration::from_secs(10));
                 let mut waker = waker.lock().unwrap();
                 if let Some(ref mut w) = *waker {
                     w.wake();
@@ -276,40 +276,35 @@ impl Future for KeepConnected {
     type Error = Never;
 
     fn poll(&mut self, cx: &mut task::Context) -> Poll<Self::Item, Self::Error> {
-        // return from this loop with 'pending' if enough peers are connected
-        loop {
-            while self.connections.len() < self.min_connections {
-                if let Some(addr) = self.get_an_address() {
-                    self.connections.push(self.p2p.add_peer("biadnet", PeerSource::Outgoing(addr)));
-                }
-                else {
-                    warn!("no more biadnet peers to connect");
-                    let mut waker = self.waker.lock().unwrap();
-                    *waker = Some(cx.waker().clone());
-                    return Ok(Async::Pending);
+        // find a finished peers
+        let finished = self.connections.iter_mut().enumerate().filter_map(|(i, c)| {
+            match c.poll(cx) {
+                Ok(Async::Pending) => None,
+                Ok(Async::Ready(address)) => {
+                    trace!("keep connected woke up to lost peer at {}", address);
+                    Some(i)
+                },
+                Err(e) => {
+                    trace!("keep connected woke up to error {:?}", e);
+                    Some(i)
                 }
             }
-            // find a finished peer
-            let finished = self.connections.iter_mut().enumerate().filter_map(|(i, f)| {
-                // if any of them finished
-                // note that poll is reusing context of this poll, so wakeups come here
-                match f.poll(cx) {
-                    Ok(Async::Pending) => None,
-                    Ok(Async::Ready(address)) => {
-                        trace!("keep connected woke up to lost peer at {}", address);
-                        Some((i, Ok(address)))
-                    }
-                    Err(e) => {
-                        trace!("keep connected woke up to error {:?}", e);
-                        Some((i, Err(e)))
-                    }
-                }
-            }).next();
-            match finished {
-                Some((i, _)) => {self.connections.remove(i);},
-                None => {}
-            };
+        }).collect::<Vec<_>>();
+        for (n, i) in finished.iter().enumerate() {
+            self.connections.remove(*i - n);
         }
+        while self.connections.len() < self.min_connections {
+            if let Some(addr) = self.get_an_address() {
+                self.connections.push(self.p2p.add_peer("biadnet", PeerSource::Outgoing(addr)));
+            }
+            else {
+                warn!("no more bitcoin peers to connect");
+                break;
+            }
+        }
+        let mut waker = self.waker.lock().unwrap();
+        *waker = Some(cx.waker().clone());
+        return Ok(Async::Pending);
     }
 }
 
