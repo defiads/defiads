@@ -205,4 +205,10 @@ impl ContentStore {
         }
         Ok(false)
     }
+
+    pub fn list_abstracts(&self, cats: Vec<String>) -> Result<Vec<(String,String)>, BiadNetError> {
+        let mut db = self.db.lock().unwrap();
+        let mut tx = db.transaction();
+        Ok(tx.list_abstracts(cats)?)
+    }
 }

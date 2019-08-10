@@ -6,7 +6,7 @@ use futures::StreamExt;
 
 pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore) {
     let mut io = IoHandler::default();
-    io.add_method("list", |p:Params| {
+    io.add_method("list", move |p:Params| {
         let mut cats = Vec::new();
         match p {
             Params::Array(array) => {
@@ -18,8 +18,14 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore) {
                 }
             }
             _ => return Err(Error::invalid_params("expecting an array of categories"))
-        }
-        Ok(Value::String(cats.iter().fold(String::new(), |a, s| { a + s.as_str()})))
+        };
+        match store.read().unwrap().list_abstracts(cats) {
+            Ok(result) => return Ok(serde_json::to_value(result).unwrap()),
+            Err(e) => {
+                debug!("failed to retrieve abstracts {:?}", e);
+                return Err(Error::internal_error());
+            }
+        };
     });
 
     let server = ServerBuilder::new(io)

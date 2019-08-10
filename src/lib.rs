@@ -27,6 +27,8 @@
 extern crate snap;
 extern crate byteorder;
 extern crate serde;
+extern crate serde_cbor;
+extern crate serde_json;
 extern crate rand_distr;
 #[macro_use]extern crate serde_derive;
 #[cfg(test)]extern crate hex;

@@ -317,6 +317,34 @@ impl<'db> TX<'db> {
             eligible[
                 std::cmp::min(len-1, thread_rng().sample::<f64,_>(Poisson::new(len as f64 / 4.0).unwrap()) as usize)]))
     }
+
+    pub fn list_abstracts(&mut self, cats: Vec<String>) -> Result<Vec<(String, String)>, BiadNetError> {
+        // mut &self because using temp table
+        self.tx.execute(r#"
+            create temp table cats (
+                cat text
+            );
+        "#, NO_PARAMS)?;
+        for c in &cats {
+            self.tx.execute(r#"
+                insert into temp.cats (cat) values(?1)
+            "#, &[c as &ToSql])?;
+        }
+        let mut statement = self.tx.prepare(r#"
+            select id, abs from content where cat in (select cat from temp.cats)
+        "#)?;
+
+        let result = statement.query_map(NO_PARAMS, |r| {
+            Ok((r.get_unwrap::<usize, String>(0), r.get_unwrap::<usize, String>(1)))
+        })?.filter_map(|r| if let Ok(pair) = r { Some(pair) } else {None})
+            .collect::<Vec<_>>();
+
+        self.tx.execute(r#"
+            drop table temp.cats
+        "#, NO_PARAMS)?;
+
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
