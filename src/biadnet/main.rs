@@ -15,6 +15,8 @@
 //
 
 #[macro_use]extern crate log;
+extern crate clap;
+use clap::{Arg, App, SubCommand};
 
 use simple_logger;
 use log::Level;
@@ -41,36 +43,107 @@ use std::sync::{Arc,RwLock, Mutex};
 use std::thread;
 use biadne::api::start_api;
 
-pub const STORAGE_LIMIT: u64 = 2^20;
 const HTTP_RPC: &str = "127.0.0.1:21767";
 
 pub fn main () {
-    let cmd = CommandLine::new();
-    let loglevel = Level::from_str(cmd.opt_arg("log-level").unwrap_or("debug".to_string()).as_str()).expect("unkown log level use one of: OFF ERROR WARN INFO DEBUG TRACE");
+    let listen_default = ("0.0.0.0".to_string() + ":") + BIADNET_PORT.to_string().as_str();
 
-    simple_logger::init_with_level(loglevel).unwrap();
-    info!("biadnet starting.");
+    let matches = App::new("biadnet").version("0.1.0").author("tamas.blummer@protonmail.com")
+        .about("Bitcoin Advertizing Network")
+        .arg(Arg::with_name("log-level")
+            .long("log-level")
+            .value_name("LEVEL")
+            .help("Set log level.")
+            .takes_value(true)
+            .possible_values(&["OFF", "ERROR", "WARN", "INFO", "DEBUG", "TRACE"])
+            .case_insensitive(true)
+            .default_value("INFO"))
+        .arg(Arg::with_name("bitcoin-network")
+            .long("bitcoin-network")
+            .value_name("NETWORK")
+            .help("Set the used bitcoin network.")
+            .takes_value(true)
+            .possible_values(&["bitcoin", "testnet", "regtest"])
+            .default_value("bitcoin"))
+        .arg(Arg::with_name("bitcoin-connections")
+            .value_name("n")
+            .long("bitcoin-connections")
+            .help("Desired number of connections to the bitcoin network")
+            .takes_value(true).default_value("5"))
+        .arg(Arg::with_name("biadnet-connections")
+            .value_name("n")
+            .long("biadnet-connections")
+            .help("Desired number of connections to the biadnet network")
+            .takes_value(true).default_value("5"))
+        .arg(Arg::with_name("bitcoin-peers")
+            .long("bitcoin-peers")
+            .value_name("ADDRESS")
+            .help("Bitcoin network peers to connect")
+            .multiple(true)
+            .use_delimiter(true)
+            .min_values(1)
+            .takes_value(true))
+        .arg(Arg::with_name("biadnet-peers")
+            .long("biadnet-peers")
+            .value_name("ADDRESS")
+            .help("Biadnet network peers to connect")
+            .multiple(true)
+            .use_delimiter(true)
+            .min_values(1)
+            .takes_value(true))
+        .arg(Arg::with_name("http-rpc")
+            .long("http-rpc")
+            .value_name("ADDRESS")
+            .help("Listen to http-rpc on this address.")
+            .takes_value(true)
+            .default_value(HTTP_RPC))
+        .arg(Arg::with_name("listen")
+            .long("listen")
+            .value_name("ADDRESS")
+            .multiple(true)
+            .help("Listen to incoming biadnet connections")
+            .takes_value(true)
+            .use_delimiter(true)
+            .min_values(1))
+        .arg(Arg::with_name("db")
+            .value_name("FILE")
+            .long("db")
+            .help("Database name")
+            .takes_value(true)
+            .default_value("biad.db"))
+        .arg(Arg::with_name("storage-limit")
+            .value_name("n")
+            .long("storage-limit")
+            .help("Storage limit in GB")
+            .takes_value(true)
+            .default_value("1")).get_matches();
 
-    let bitcoin_network = Network::from_str(cmd.opt_arg("bitcoin_network").unwrap_or("bitcoin".to_string()).as_str()).expect("unkown Bitcoin network");
-    let biadnet_connections = cmd.opt_arg_usize("biadnet-connections").unwrap_or(5);
-    let bitcoin_connections = cmd.opt_arg_usize("bitcoin-connections").unwrap_or(5);
+    let level = Level::from_str(matches.value_of("log-level").unwrap()).unwrap();
+    simple_logger::init_with_level(level).unwrap();
+    info!("biadnet starting, with log-level {}", level);
 
-    let biadnet_peers = get_socket_vec(cmd.opt_arg("biadnet-peers")).unwrap_or(Vec::new());
-    let bitcoin_peers = get_socket_vec(cmd.opt_arg("bitcoin-peers")).unwrap_or(Vec::new());
-    let http_rpc = get_socket_vec(Some(cmd.opt_arg("http-rpc").unwrap_or(HTTP_RPC.to_string())));
+    let bitcoin_network = matches.value_of("bitcoin-network").unwrap().parse::<Network>().unwrap();
+    let biadnet_connections = matches.value_of("biadnet-connections").unwrap().parse::<usize>().unwrap();
+    let bitcoin_connections = matches.value_of("bitcoin-connections").unwrap().parse::<usize>().unwrap();
 
-    let biadnet_listen = get_socket_vec(
-        Some(cmd.opt_arg("listen").unwrap_or (("0.0.0.0".to_string() + ":") + BIADNET_PORT.to_string().as_str())))
-        .unwrap_or(Vec::new());
+    let biadnet_peers = matches.values_of("biadnet-peers").unwrap_or_default().map(
+        |s| SocketAddr::from_str(s).expect("invalid socket address")).collect();
 
-    let db_name = cmd.opt_arg("db").unwrap_or("biad.db".to_string());
-    let db_path = std::path::Path::new(db_name.as_str());
+    let bitcoin_peers = matches.values_of("bitcoin-peers").unwrap_or_default().map(
+        |s| SocketAddr::from_str(s).expect("invalid socket address")).collect();
+
+    let http_rpc = matches.value_of("http-rpc").map(|s| SocketAddr::from_str(s).expect("invalid socket address"));
+    let biadnet_listen = matches.values_of("listen").unwrap_or_default().map(
+        |s| SocketAddr::from_str(s).expect("invalid socket address")).collect();
+
+    let db_name = matches.value_of("db").unwrap();
+    let db_path = std::path::Path::new(db_name);
 
     let mut chaindb = ChainDB::new(db_path, bitcoin_network, 0).expect("can not open chain db");
     chaindb.init(false).expect("can not initialize db");
     let chaindb = Arc::new(RwLock::new(chaindb));
 
-    let storage_limit = cmd.opt_arg_usize("storage-limit-gib").unwrap_or(STORAGE_LIMIT as usize) as u64;
+    let storage_limit = matches.value_of("storage-limit").unwrap().parse::<u64>().expect("expecting number of GB") * 1000*1000;
 
     let mut db = DB::new(db_path).expect("can not open db");
     let mut tx = db.transaction();
@@ -84,12 +157,10 @@ pub fn main () {
             .expect("can not initialize content store")));
 
     if let Some(http) = http_rpc {
-        if !http.is_empty() {
-            let address = http[0].clone();
-            let store = content_store.clone();
-            thread::Builder::new().name("http".to_string()).spawn(
-                move || start_api(&address, store)).expect("can not start http api");
-        }
+        let address = http.clone();
+        let store = content_store.clone();
+        thread::Builder::new().name("http".to_string()).spawn(
+            move || start_api(&address, store)).expect("can not start http api");
     }
 
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
@@ -98,76 +169,4 @@ pub fn main () {
     P2PBiadNet::new(biadnet_connections, biadnet_peers, biadnet_listen, db.clone(),
                     content_store.clone()).start(&mut thread_pool);
     thread_pool.run::<Empty<(), Never>>(future::empty()).unwrap();
-}
-
-fn get_socket_vec(s: Option<String>) -> Option<Vec<SocketAddr>> {
-    if let Some (ref s) = s {
-        return Some(s.split(",").map(|s| SocketAddr::from_str(s).expect("invalid socket address")).collect::<Vec<_>>())
-    }
-    None
-}
-
-struct CommandLine {
-    pub arguments: Vec<String>,
-    options: HashMap<String, Option<String>>
-}
-
-impl CommandLine {
-    #[allow(unused)]
-    pub fn has_opt (&self, opt: &str) -> bool {
-        self.options.contains_key(&opt.to_string())
-    }
-
-    pub fn opt_arg (&self, opt: &str) -> Option<String> {
-        if let Some(a) = self.options.get(&opt.to_string()) {
-            return a.clone();
-        }
-        None
-    }
-
-    pub fn opt_arg_usize (&self, opt: &str) -> Option<usize> {
-        if let Some(a) = self.options.get(&opt.to_string()) {
-            if let Some(s) = a {
-                if let Ok(n) = s.parse::<usize>() {
-                    return Some(n);
-                }
-            }
-        }
-        None
-    }
-
-
-    pub fn new () -> CommandLine {
-        let mut arguments = Vec::new();
-        let mut options = HashMap::new();
-        let mut oi = args().skip(1).take_while(|a| a.as_str() != "--");
-        let mut next = oi.next();
-        while let Some(ref a) = next {
-            if a.starts_with("--") {
-                let (_, option) = a.split_at(2);
-                if let Some(ref optargs) = oi.next() {
-                    if optargs.starts_with("--") {
-                        options.insert(option.to_string(), None);
-                        next = Some(optargs.clone());
-                    }
-                    else {
-                        options.insert(option.to_string(), Some(optargs.clone()));
-                        next = oi.next();
-                    }
-                }
-                else {
-                    options.insert(option.to_string(), None);
-                    next = None;
-                }
-            }
-            else {
-                arguments.push(a.clone());
-                next = oi.next();
-            }
-        }
-        for a in args().skip_while(|a| a.as_str() != "--").skip(1) {
-            arguments.push(a);
-        }
-        CommandLine{arguments, options}
-    }
 }
