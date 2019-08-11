@@ -40,6 +40,7 @@ use std::time::UNIX_EPOCH;
 const MINIMUM_IBLT_SIZE: u32 = 100;
 const MAXIMUM_IBLT_SIZE: u32 = MINIMUM_IBLT_SIZE << 2;
 const POLL_FREQUENCY: u64 = 60; // every minute
+const SKETCH_SIZE:usize = 10;
 
 pub struct Discovery {
     p2p: P2PControlSender<Message>,
@@ -163,7 +164,7 @@ impl Discovery {
                 last_polled = SystemTime::now();
                 let mut db = self.db.lock().unwrap();
                 let mut tx = db.transaction();
-                let (sketch, size) = tx.compute_address_sketch(10).expect("can not compute address sketch");
+                let (sketch, size) = tx.compute_address_sketch(SKETCH_SIZE).expect("can not compute address sketch");
                 let poll = PollAddressMessage {
                     sketch,
                     size
@@ -181,7 +182,7 @@ impl Discovery {
     fn poll_address(&mut self, pid: PeerId) {
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
-        let (sketch, size) = tx.compute_address_sketch(10).expect("can not compute address sketch");
+        let (sketch, size) = tx.compute_address_sketch(SKETCH_SIZE).expect("can not compute address sketch");
         let poll = PollAddressMessage {
             sketch,
             size

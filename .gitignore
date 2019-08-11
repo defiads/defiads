@@ -8,3 +8,5 @@ Cargo.lock
 *.lg
 *.tb
 *.db
+*.cfg
+*.log
