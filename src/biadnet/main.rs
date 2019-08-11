@@ -50,6 +50,7 @@ use std::time::SystemTime;
 use std::alloc::System;
 use rand::{thread_rng, RngCore};
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 
 
 const HTTP_RPC: &str = "127.0.0.1:21767";
@@ -57,6 +58,7 @@ const HTTP_RPC: &str = "127.0.0.1:21767";
 #[derive(Serialize, Deserialize)]
 struct Config {
     apikey: String,
+    birth: u64
 }
 
 pub fn main () {
@@ -194,7 +196,8 @@ pub fn main () {
         let mut random = [0u8;12];
         thread_rng().fill_bytes(&mut random);
         let config = Config {
-            apikey: base64::encode(&random)
+            apikey: base64::encode(&random),
+            birth: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
         };
         fs::write(config_path, toml::to_string(&config).unwrap()).expect("can not write config file");
         config
