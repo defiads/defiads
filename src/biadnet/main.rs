@@ -51,9 +51,11 @@ use std::alloc::System;
 use rand::{thread_rng, RngCore};
 use std::path::Path;
 use std::time::UNIX_EPOCH;
+use log_panics;
 
 
 const HTTP_RPC: &str = "127.0.0.1:21767";
+const BIADNET_LISTEN: &str = "0.0.0.0:21766";
 
 #[derive(Serialize, Deserialize)]
 struct Config {
@@ -62,7 +64,7 @@ struct Config {
 }
 
 pub fn main () {
-    let listen_default = ("0.0.0.0".to_string() + ":") + BIADNET_PORT.to_string().as_str();
+    log_panics::init();
 
     let matches = App::new("biadnet").version("0.1.0").author("tamas.blummer@protonmail.com")
         .about("Bitcoin Advertizing Network")
@@ -112,7 +114,8 @@ pub fn main () {
             .value_name("ADDRESS")
             .help("Listen to http-rpc on this address.")
             .takes_value(true)
-            .default_value(HTTP_RPC))
+            .default_value(HTTP_RPC)
+            .min_values(1))
         .arg(Arg::with_name("listen")
             .long("listen")
             .value_name("ADDRESS")
@@ -120,13 +123,14 @@ pub fn main () {
             .help("Listen to incoming biadnet connections")
             .takes_value(true)
             .use_delimiter(true)
+            .default_value(BIADNET_LISTEN)
             .min_values(1))
         .arg(Arg::with_name("db")
             .value_name("FILE")
             .long("db")
             .help("Database name")
             .takes_value(true)
-            .default_value("biad.db"))
+            .default_value("biadnet.db"))
         .arg(Arg::with_name("storage-limit")
             .value_name("n")
             .long("storage-limit")
@@ -144,8 +148,22 @@ pub fn main () {
             .long("log-file")
             .help("Log file path.")
             .takes_value(true)
-            .default_value("biadnet.log")
-        ).get_matches();
+            .default_value("biadnet.log"))
+        .arg(Arg::with_name("bitcoin-discovery")
+            .long("bitcoin-discovery")
+            .help("Enable/Disable bitcoin network discovery")
+            .takes_value(true)
+            .possible_values(&["ON", "OFF"])
+            .case_insensitive(true)
+            .default_value("ON"))
+        .arg(Arg::with_name("biadnet-discovery")
+            .long("biadnet-discovery")
+            .help("Enable/Disable biadnet network discovery")
+            .takes_value(true)
+            .possible_values(&["ON", "OFF"])
+            .case_insensitive(true)
+            .default_value("ON"))
+        .get_matches();
 
     let level = log::LevelFilter::from_str(matches.value_of("log-level").unwrap()).unwrap();
     let log_file = matches.value_of("log-file").unwrap();
@@ -160,14 +178,30 @@ pub fn main () {
     info!("biadnet starting, with log-level {}", level);
 
     let bitcoin_network = matches.value_of("bitcoin-network").unwrap().parse::<Network>().unwrap();
-    let biadnet_connections = matches.value_of("biadnet-connections").unwrap().parse::<usize>().unwrap();
-    let bitcoin_connections = matches.value_of("bitcoin-connections").unwrap().parse::<usize>().unwrap();
+    let mut biadnet_connections = matches.value_of("biadnet-connections").unwrap().parse::<usize>().unwrap();
+    let mut bitcoin_connections = matches.value_of("bitcoin-connections").unwrap().parse::<usize>().unwrap();
 
     let biadnet_peers = matches.values_of("biadnet-peers").unwrap_or_default().map(
-        |s| SocketAddr::from_str(s).expect("invalid socket address")).collect();
+        |s| SocketAddr::from_str(s).expect("invalid socket address")).collect::<Vec<SocketAddr>>();
 
     let bitcoin_peers = matches.values_of("bitcoin-peers").unwrap_or_default().map(
-        |s| SocketAddr::from_str(s).expect("invalid socket address")).collect();
+        |s| SocketAddr::from_str(s).expect("invalid socket address")).collect::<Vec<SocketAddr>>();
+
+    let bitcoin_discovery = matches.value_of("bitcoin-discovery").unwrap().eq_ignore_ascii_case("ON");
+    if bitcoin_discovery == false  {
+        if bitcoin_peers.len() == 0 {
+            panic!("You have to provide bitcoin-peers or enable bitcoin-discovery");
+        }
+        bitcoin_connections = bitcoin_peers.len();
+    }
+
+    let biadnet_discovery = matches.value_of("biadnet-discovery").unwrap().eq_ignore_ascii_case("ON");
+    if biadnet_discovery == false  {
+        if biadnet_peers.len() == 0 {
+            panic!("You have to provide biadnet-peers or enable biadnet-discovery");
+        }
+        biadnet_connections = biadnet_peers.len();
+    }
 
     let http_rpc = matches.value_of("http-rpc").map(|s| SocketAddr::from_str(s).expect("invalid socket address"));
     let biadnet_listen = matches.values_of("listen").unwrap_or_default().map(
@@ -216,9 +250,9 @@ pub fn main () {
     }
 
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
-    P2PBitcoin::new(bitcoin_network, bitcoin_connections, bitcoin_peers, chaindb.clone(), db.clone(),
+    P2PBitcoin::new(bitcoin_network, bitcoin_connections, bitcoin_peers, bitcoin_discovery, chaindb.clone(), db.clone(),
                     content_store.clone()).start(&mut thread_pool);
-    P2PBiadNet::new(biadnet_connections, biadnet_peers, biadnet_listen, db.clone(),
+    P2PBiadNet::new(biadnet_connections, biadnet_peers, biadnet_listen, biadnet_discovery, db.clone(),
                     content_store.clone()).start(&mut thread_pool);
     thread_pool.run::<Empty<(), Never>>(future::empty()).unwrap();
 }
