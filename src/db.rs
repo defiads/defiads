@@ -37,6 +37,8 @@ use crate::iblt::min_sketch;
 use rand_distr::Poisson;
 use crate::text::Text;
 use bitcoin::PublicKey;
+use std::time::UNIX_EPOCH;
+use crate::discovery::NetAddress;
 
 pub type SharedDB = Arc<Mutex<DB>>;
 
@@ -120,7 +122,7 @@ impl<'db> TX<'db> {
         Ok(iblt)
     }
 
-    pub fn compute_min_sketch (&mut self, len: usize) -> Result<(Vec<u64>, Vec<(u64, u64)>, u32), BiadNetError> {
+    pub fn compute_content_sketch(&mut self, len: usize) -> Result<(Vec<u64>, Vec<(u64, u64)>, u32), BiadNetError> {
         let mut query = self.tx.prepare(r#"
             select id from content
         "#)?;
@@ -131,6 +133,22 @@ impl<'db> TX<'db> {
 
         Ok(min_sketch(len, K0, K1, &mut key_iterator))
     }
+
+
+    pub fn compute_address_sketch (&mut self, len: usize) -> Result<(Vec<u64>, u32), BiadNetError> {
+        let mut query = self.tx.prepare(r#"
+            select ip from address where network = ?1 and last_seen > ?2 and banned < ?2
+        "#)?;
+        let yesterday = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 24*60*60;
+        let mut key_iterator = query.query_map::<String,&[&ToSql],_>(
+            &[&("biadnet".to_string()) as &dyn ToSql, &(yesterday as i64)], |r| Ok(r.get(0)?))?
+            .filter_map(|r| if let Ok(s) = r {
+                Some(NetAddress::new(&SocketAddr::from_str(s.as_str()).expect("address stored in db should be parsable")))}else{None});
+
+        let (sketch, _, n_keys) = min_sketch(len, K0, K1, &mut key_iterator);
+        Ok((sketch, n_keys))
+    }
+
 
     pub fn store_content(&mut self, height: u32, block_id: &sha256d::Hash, c: &Content, amount: u64) -> Result<usize, BiadNetError> {
         let id = c.ad.digest();

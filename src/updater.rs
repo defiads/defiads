@@ -88,7 +88,7 @@ impl Updater {
                                                     size <<= 2;
                                                 }
                                                 let iblt = store.get_iblt(size).expect("could not compute IBLT").clone();
-                                                self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::IBLT);
+                                                self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::ContentIBLT);
                                                 debug!("ask IBLT of size {} from peer={}", size, pid);
                                                 self.p2p.send_network(pid, Message::ContentIBLT(our_tip, iblt));
                                             }
@@ -111,7 +111,7 @@ impl Updater {
                                 }
                             },
                             Message::ContentIBLT(tip, mut iblt) => {
-                                self.timeout.lock().unwrap().received(pid, 1, ExpectedReply::IBLT);
+                                self.timeout.lock().unwrap().received(pid, 1, ExpectedReply::ContentIBLT);
                                 debug!("received IBLT from peer={}", pid);
                                 let mut store = self.store.write().unwrap();
                                 if let Some(our_tip) = store.get_tip() {
@@ -179,7 +179,7 @@ impl Updater {
                     }
                 }
             }
-            self.timeout.lock().unwrap().check(vec!(ExpectedReply::PollContent, ExpectedReply::IBLT, ExpectedReply::Content, ExpectedReply::Get));
+            self.timeout.lock().unwrap().check(vec!(ExpectedReply::PollContent, ExpectedReply::ContentIBLT, ExpectedReply::Content, ExpectedReply::Get));
             if SystemTime::now().duration_since(last_polled).unwrap().as_secs() > POLL_FREQUENCY {
                 last_polled = SystemTime::now();
                 let store = self.store.read().unwrap();

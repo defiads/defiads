@@ -402,9 +402,11 @@ impl AddressPoolMaintainer {
 #[derive(Eq, PartialEq, Hash, Debug)]
 pub enum ExpectedReply {
     PollContent,
-    IBLT,
+    ContentIBLT,
     Content,
-    Get
+    Get,
+    PollAddress,
+    AddressIBLT
 }
 
 pub struct ChainDBTrunk {

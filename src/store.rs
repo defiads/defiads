@@ -57,7 +57,7 @@ impl ContentStore {
         {
             let mut db = db.lock().unwrap();
             let mut tx = db.transaction();
-            let (m, k, n) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
+            let (m, k, n) = tx.compute_content_sketch(MIN_SKETCH_SIZE)?;
             mins = m;
             ksequence = k;
             n_keys = n;
@@ -108,7 +108,7 @@ impl ContentStore {
             }
         }
         if deleted_some {
-            let (m, k, n) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
+            let (m, k, n) = tx.compute_content_sketch(MIN_SKETCH_SIZE)?;
             self.min_sketch = m;
             self.ksequence = k;
             self.n_keys = n;
@@ -130,7 +130,7 @@ impl ContentStore {
             }
         }
         if deleted_some {
-            let (m, k, n) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
+            let (m, k, n) = tx.compute_content_sketch(MIN_SKETCH_SIZE)?;
             self.min_sketch = m;
             self.ksequence = k;
             self.n_keys = n;
@@ -150,7 +150,7 @@ impl ContentStore {
             }
         }
         if deleted_some {
-            let (m, k, n) = tx.compute_min_sketch(MIN_SKETCH_SIZE)?;
+            let (m, k, n) = tx.compute_content_sketch(MIN_SKETCH_SIZE)?;
             self.min_sketch = m;
             self.ksequence = k;
             self.n_keys = n;

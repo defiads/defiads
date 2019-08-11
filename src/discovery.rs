@@ -23,8 +23,9 @@ use std::ops::BitXorAssign;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
+use std::time::{SystemTime, Duration};
 
-use murmel::p2p::{PeerId, P2PControlSender, PeerMessageSender, PeerMessageReceiver};
+use murmel::p2p::{PeerId, P2PControlSender, PeerMessageSender, PeerMessageReceiver, PeerMessage};
 use murmel::timeout::SharedTimeout;
 
 use crate::p2p_biadnet::ExpectedReply;
@@ -57,7 +58,37 @@ impl Discovery {
     }
 
     fn run(&mut self, receiver: PeerMessageReceiver<Message>) {
+        let mut last_polled = SystemTime::now();
+        loop {
+            while let Ok(msg) = receiver.recv_timeout(Duration::from_millis(1000)) {
+                match msg {
+                    PeerMessage::Connected(pid, _) => {
+                        debug!("address poll peer={}", pid);
+                        self.poll_address(pid);
+                        last_polled = SystemTime::now();
+                    },
+                    PeerMessage::Disconnected(pid,_) => {
+                        self.poll_asked.remove(&pid);
+                    }
+                    PeerMessage::Message(pid, msg) => {}
+                }
+            }
+            self.timeout.lock().unwrap().check(vec!(ExpectedReply::PollAddress, ExpectedReply::AddressIBLT));
+        }
+    }
 
+    fn poll_address(&mut self, pid: PeerId) {
+        let mut db = self.db.lock().unwrap();
+        let mut tx = db.transaction();
+        let (sketch, size) = tx.compute_address_sketch(10).expect("can not compute address sketch");
+        let poll = PollAddressMessage {
+            sketch,
+            size
+        };
+
+        self.poll_asked.insert(pid, poll.clone());
+        self.p2p.send_network(pid, Message::PollAddress(poll));
+        self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::PollAddress);
     }
 }
 
