@@ -31,7 +31,7 @@ use murmel::timeout::SharedTimeout;
 use crate::p2p_biadnet::ExpectedReply;
 use crate::messages::{PollAddressMessage, Message};
 use crate::error::BiadNetError;
-use crate::iblt::{IBLTKey, estimate_diff_size};
+use crate::iblt::{IBLTKey, estimate_diff_size, IBLT, IBLTEntry};
 use crate::db::SharedDB;
 
 
@@ -43,14 +43,15 @@ pub struct Discovery {
     p2p: P2PControlSender<Message>,
     timeout: SharedTimeout<Message, ExpectedReply>,
     db: SharedDB,
-    poll_asked: HashMap<PeerId, PollAddressMessage>
+    poll_asked: HashMap<PeerId, PollAddressMessage>,
+    iblt_sent: HashMap<PeerId, IBLT<NetAddress>>
 }
 
 impl Discovery {
     pub fn new(p2p: P2PControlSender<Message>, timeout: SharedTimeout<Message, ExpectedReply>, db: SharedDB) -> PeerMessageSender<Message> {
         let (sender, receiver) = mpsc::sync_channel(p2p.back_pressure);
 
-        let mut discovery = Discovery { p2p, timeout, db, poll_asked: HashMap::new() };
+        let mut discovery = Discovery { p2p, timeout, db, poll_asked: HashMap::new(), iblt_sent: HashMap::new() };
 
         thread::Builder::new().name("discovery".to_string()).spawn(move || { discovery.run(receiver) }).unwrap();
 
@@ -69,6 +70,7 @@ impl Discovery {
                     },
                     PeerMessage::Disconnected(pid,_) => {
                         self.poll_asked.remove(&pid);
+                        self.iblt_sent.remove(&pid);
                     }
                     PeerMessage::Message(pid, msg) => {
                         match msg {
@@ -88,6 +90,7 @@ impl Discovery {
                                         let mut db = self.db.lock().unwrap();
                                         let mut tx = db.transaction();
                                         let iblt = tx.compute_address_iblt(size).expect("could not compute address IBLT").clone();
+                                        self.iblt_sent.insert(pid, iblt.clone());
                                         self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::AddressIBLT);
                                         debug!("ask IBLT of size {} from peer={}", size, pid);
                                         self.p2p.send_network(pid, Message::AddressIBLT(iblt));
@@ -96,6 +99,37 @@ impl Discovery {
                                         debug!("in sync with peer={}", pid);
                                     }
                                 }
+                                else {
+                                    // this is initial request
+                                    debug!("reply address poll to peer={}", pid);
+                                    self.poll_address(pid)
+                                }
+                            }
+                            Message::AddressIBLT(mut iblt) => {
+                                self.timeout.lock().unwrap().received(pid, 1, ExpectedReply::AddressIBLT);
+                                debug!("received address IBLT from peer={}", pid);
+                                if let Some(sent) = self.iblt_sent.remove(&pid) {
+                                    iblt.substract(&sent);
+                                }
+                                let mut db = self.db.lock().unwrap();
+                                let mut tx = db.transaction();
+                                for entry in iblt.into_iter() {
+                                    if let Ok(entry) = entry {
+                                        match entry {
+                                            IBLTEntry::Deleted(addr) => {
+                                                if let Ok(addr) = addr.socket_address() {
+                                                    tx.store_address("biadnet", &addr, 0, 0).expect("can not store addresses");
+                                                }
+                                            }
+                                            _ => {}
+                                        };
+                                    }
+                                    else {
+                                        debug!("not successful inverting address IBLT diff with peer={}", pid);
+                                        break;
+                                    }
+                                }
+                                tx.commit();
                             }
                             _ => {}
                         }
