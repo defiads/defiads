@@ -49,7 +49,7 @@ impl Updater {
 
         let mut updater = Updater { p2p, timeout, store, poll_asked: HashMap::new() };
 
-        thread::Builder::new().name("biadnet updater".to_string()).spawn(move || { updater.run(receiver) }).unwrap();
+        thread::Builder::new().name("updater".to_string()).spawn(move || { updater.run(receiver) }).unwrap();
 
         PeerMessageSender::new(sender)
     }

@@ -47,7 +47,7 @@ use rand::{RngCore, thread_rng};
 
 use crate::find_peers::seed;
 use crate::messages::{Message, Envelope, VersionMessage};
-use crate::discovery::NetAddress;
+use crate::discovery::{NetAddress, Discovery};
 use crate::updater::Updater;
 
 use serde_cbor::Deserializer;
@@ -216,6 +216,10 @@ impl P2PBiadNet {
 
         let timeout = Arc::new(Mutex::new(Timeout::new(p2p_control.clone())));
 
+        if self.discovery {
+            let discovery = Discovery::new(p2p_control.clone(), timeout.clone(), self.db.clone());
+            dispatcher.add_listener(discovery);
+        }
         let updater = Updater::new(p2p_control.clone(), timeout.clone(), self.content_store.clone());
         dispatcher.add_listener(updater);
         let address_pool = AddressPoolMaintainer::new(p2p_control.clone(), self.db.clone());

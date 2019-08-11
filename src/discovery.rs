@@ -20,9 +20,46 @@ use std::io;
 use std::hash::Hasher;
 use byteorder::{ByteOrder, LittleEndian};
 use std::ops::BitXorAssign;
+use std::collections::HashMap;
+use std::sync::mpsc;
+use std::thread;
 
+use murmel::p2p::{PeerId, P2PControlSender, PeerMessageSender, PeerMessageReceiver};
+use murmel::timeout::SharedTimeout;
+
+use crate::p2p_biadnet::ExpectedReply;
+use crate::messages::{PollAddressMessage, Message};
 use crate::error::BiadNetError;
 use crate::iblt::IBLTKey;
+use crate::db::SharedDB;
+
+
+const MINIMUM_IBLT_SIZE: u32 = 100;
+const MAXIMUM_IBLT_SIZE: u32 = MINIMUM_IBLT_SIZE << 2;
+const POLL_FREQUENCY: u64 = 60; // every minute
+
+pub struct Discovery {
+    p2p: P2PControlSender<Message>,
+    timeout: SharedTimeout<Message, ExpectedReply>,
+    db: SharedDB,
+    poll_asked: HashMap<PeerId, PollAddressMessage>
+}
+
+impl Discovery {
+    pub fn new(p2p: P2PControlSender<Message>, timeout: SharedTimeout<Message, ExpectedReply>, db: SharedDB) -> PeerMessageSender<Message> {
+        let (sender, receiver) = mpsc::sync_channel(p2p.back_pressure);
+
+        let mut discovery = Discovery { p2p, timeout, db, poll_asked: HashMap::new() };
+
+        thread::Builder::new().name("discovery".to_string()).spawn(move || { discovery.run(receiver) }).unwrap();
+
+        PeerMessageSender::new(sender)
+    }
+
+    fn run(&mut self, receiver: PeerMessageReceiver<Message>) {
+
+    }
+}
 
 #[derive(Clone, Copy, Serialize, Deserialize, Hash, Default, Eq, PartialEq, Debug)]
 pub struct NetAddress {
