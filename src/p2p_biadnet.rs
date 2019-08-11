@@ -300,7 +300,7 @@ impl Future for KeepConnected {
                 self.connections.push(self.p2p.add_peer("biadnet", PeerSource::Outgoing(addr)));
             }
             else {
-                warn!("no more bitcoin peers to connect");
+                warn!("no more biadnet peers to connect, currently have {}", self.connections.len());
                 break;
             }
         }

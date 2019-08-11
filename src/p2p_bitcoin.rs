@@ -188,7 +188,7 @@ impl Future for KeepConnected {
                 self.connections.push(self.p2p.add_peer("bitcoin", PeerSource::Outgoing(addr)));
             }
             else {
-                warn!("no more bitcoin peers to connect");
+                warn!("no more bitcoin peers to connect, currently have {}", self.connections.len());
                 break;
             }
         }
