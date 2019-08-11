@@ -46,14 +46,15 @@ pub struct Discovery {
     timeout: SharedTimeout<Message, ExpectedReply>,
     db: SharedDB,
     poll_asked: HashMap<PeerId, PollAddressMessage>,
-    iblt_sent: HashMap<PeerId, IBLT<NetAddress>>
+    iblt_sent: HashMap<PeerId, IBLT<NetAddress>>,
+    addresses: HashMap<PeerId, SocketAddr>
 }
 
 impl Discovery {
     pub fn new(p2p: P2PControlSender<Message>, timeout: SharedTimeout<Message, ExpectedReply>, db: SharedDB) -> PeerMessageSender<Message> {
         let (sender, receiver) = mpsc::sync_channel(p2p.back_pressure);
 
-        let mut discovery = Discovery { p2p, timeout, db, poll_asked: HashMap::new(), iblt_sent: HashMap::new() };
+        let mut discovery = Discovery { p2p, timeout, db, poll_asked: HashMap::new(), iblt_sent: HashMap::new(), addresses: HashMap::new() };
 
         thread::Builder::new().name("discovery".to_string()).spawn(move || { discovery.run(receiver) }).unwrap();
 
@@ -64,13 +65,31 @@ impl Discovery {
         let mut last_polled = SystemTime::now();
         loop {
             while let Ok(msg) = receiver.recv_timeout(Duration::from_millis(1000)) {
+                let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
                 match msg {
-                    PeerMessage::Connected(pid, _) => {
-                        debug!("address poll peer={}", pid);
+                    PeerMessage::Connected(pid, addr) => {
+                        if let Some(address) = addr {
+                            self.addresses.insert(pid, address);
+                            let mut db = self.db.lock().unwrap();
+                            let mut tx = db.transaction();
+                            debug!("store successful connection to {} peer={}", &address, pid);
+                            tx.store_address("biadnet", &address, now, 0).expect("can not store addresses");
+                        }
                         self.poll_address(pid);
                         last_polled = SystemTime::now();
                     },
-                    PeerMessage::Disconnected(pid,_) => {
+                    PeerMessage::Disconnected(pid, banned) => {
+                        if banned {
+                            if let Some(address) = self.addresses.remove(&pid) {
+                                let mut db = self.db.lock().unwrap();
+                                let mut tx = db.transaction();
+                                let now = SystemTime::now().duration_since(
+                                    SystemTime::UNIX_EPOCH).unwrap().as_secs();
+                                debug!("store ban of {} peer={}", &address, pid);
+                                tx.store_address("bitcoin", &address, 0, now).unwrap();
+                                tx.commit();
+                            }
+                        }
                         self.poll_asked.remove(&pid);
                         self.iblt_sent.remove(&pid);
                     }
@@ -113,7 +132,6 @@ impl Discovery {
                                 if let Some(sent) = self.iblt_sent.remove(&pid) {
                                     iblt.substract(&sent);
                                 }
-                                let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
                                 let mut db = self.db.lock().unwrap();
                                 let mut tx = db.transaction();
                                 for entry in iblt.into_iter() {
