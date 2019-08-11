@@ -146,13 +146,14 @@ pub fn main () {
         ).get_matches();
 
     let level = log::LevelFilter::from_str(matches.value_of("log-level").unwrap()).unwrap();
+    let log_file = matches.value_of("log-file").unwrap();
     simplelog::CombinedLogger::init(
         vec![
-            simplelog::TermLogger::new(log::LevelFilter::Info, simplelog::Config::default(), simplelog::TerminalMode::Mixed).unwrap(),
-            simplelog::WriteLogger::new(level, simplelog::Config::default(), std::fs::File::create(matches.value_of("log-file").unwrap()).unwrap()),
+            simplelog::TermLogger::new(log::LevelFilter::Warn, simplelog::Config::default(), simplelog::TerminalMode::Mixed).unwrap(),
+            simplelog::WriteLogger::new(level, simplelog::Config::default(), std::fs::File::create(log_file).unwrap()),
         ]
     ).unwrap();
-    info!("biadnet starting, with log-level {}", level);
+    info!("biadnet starting, with log-level {} in log-file: {}", level, log_file);
 
     let bitcoin_network = matches.value_of("bitcoin-network").unwrap().parse::<Network>().unwrap();
     let biadnet_connections = matches.value_of("biadnet-connections").unwrap().parse::<usize>().unwrap();
