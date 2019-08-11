@@ -31,7 +31,7 @@ use murmel::timeout::SharedTimeout;
 use crate::p2p_biadnet::ExpectedReply;
 use crate::messages::{PollAddressMessage, Message};
 use crate::error::BiadNetError;
-use crate::iblt::IBLTKey;
+use crate::iblt::{IBLTKey, estimate_diff_size};
 use crate::db::SharedDB;
 
 
@@ -70,7 +70,36 @@ impl Discovery {
                     PeerMessage::Disconnected(pid,_) => {
                         self.poll_asked.remove(&pid);
                     }
-                    PeerMessage::Message(pid, msg) => {}
+                    PeerMessage::Message(pid, msg) => {
+                        match msg {
+                            Message::PollAddress(poll) => {
+                                if let Some(question) = self.poll_asked.remove(&pid) {
+                                    debug!("got address poll reply from peer={}", pid);
+                                    // this is a reply
+                                    self.timeout.lock().unwrap().received(pid, 1, ExpectedReply::PollAddress);
+                                    let diff = estimate_diff_size(
+                                        question.sketch.as_slice(), question.size,
+                                        poll.sketch.as_slice(), poll.size)*3/2;
+                                    if diff > 0 {
+                                        let mut size = MINIMUM_IBLT_SIZE;
+                                        while size < MAXIMUM_IBLT_SIZE && size < diff {
+                                            size <<= 2;
+                                        }
+                                        let mut db = self.db.lock().unwrap();
+                                        let mut tx = db.transaction();
+                                        let iblt = tx.compute_address_iblt(size).expect("could not compute address IBLT").clone();
+                                        self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::AddressIBLT);
+                                        debug!("ask IBLT of size {} from peer={}", size, pid);
+                                        self.p2p.send_network(pid, Message::AddressIBLT(iblt));
+                                    }
+                                    else {
+                                        debug!("in sync with peer={}", pid);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
             self.timeout.lock().unwrap().check(vec!(ExpectedReply::PollAddress, ExpectedReply::AddressIBLT));

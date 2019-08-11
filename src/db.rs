@@ -107,7 +107,7 @@ impl<'db> TX<'db> {
         "#).expect("failed to create db tables");
     }
 
-    pub fn compute_iblt (&mut self, len: u32) -> Result<IBLT<ContentKey>, BiadNetError> {
+    pub fn compute_content_iblt(&mut self, len: u32) -> Result<IBLT<ContentKey>, BiadNetError> {
         let mut iblt = IBLT::new(len, NH, K0, K1);
 
         let mut query = self.tx.prepare(r#"
@@ -134,6 +134,22 @@ impl<'db> TX<'db> {
         Ok(min_sketch(len, K0, K1, &mut key_iterator))
     }
 
+
+    pub fn compute_address_iblt(&mut self, len: u32) -> Result<IBLT<NetAddress>, BiadNetError> {
+        let mut iblt = IBLT::new(len, NH, K0, K1);
+
+        let mut query = self.tx.prepare(r#"
+            select ip from address where network = ?1 and last_seen > ?2 and banned < ?2
+        "#)?;
+        let yesterday = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 24*60*60;
+        for r in query.query_map::<String,&[&ToSql],_>(
+            &[&("biadnet".to_string()) as &dyn ToSql, &(yesterday as i64)], |r| Ok(r.get(0)?))? {
+            if let Ok(s) = r {
+                iblt.insert(&NetAddress::new(&SocketAddr::from_str(s.as_str()).expect("address stored in db should be parsable")));
+            }
+        }
+        Ok(iblt)
+    }
 
     pub fn compute_address_sketch (&mut self, len: usize) -> Result<(Vec<u64>, u32), BiadNetError> {
         let mut query = self.tx.prepare(r#"

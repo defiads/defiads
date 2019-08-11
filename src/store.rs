@@ -92,7 +92,7 @@ impl ContentStore {
     pub fn get_iblt(&mut self, size: u32) -> Result<&IBLT<ContentKey>, BiadNetError> {
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
-        Ok(self.iblts.entry(size).or_insert(tx.compute_iblt(size)?))
+        Ok(self.iblts.entry(size).or_insert(tx.compute_content_iblt(size)?))
     }
 
     /// add a header to the tip of the chain
