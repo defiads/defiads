@@ -178,10 +178,11 @@ impl Future for KeepConnected {
                 }
             }
         }).collect::<Vec<_>>();
-        for (n, i) in finished.iter().enumerate() {
+        let mut n = 0;
+        for i in finished.iter() {
             self.connections.remove(*i - n);
+            n += 1;
         }
-
         while self.connections.len() < self.min_connections {
             if let Some(addr) = self.get_an_address() {
                 self.connections.push(self.p2p.add_peer("bitcoin", PeerSource::Outgoing(addr)));
