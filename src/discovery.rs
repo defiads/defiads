@@ -33,6 +33,8 @@ use crate::messages::{PollAddressMessage, Message};
 use crate::error::BiadNetError;
 use crate::iblt::{IBLTKey, estimate_diff_size, IBLT, IBLTEntry};
 use crate::db::SharedDB;
+use serde_cbor::error::Category::Syntax;
+use std::time::UNIX_EPOCH;
 
 
 const MINIMUM_IBLT_SIZE: u32 = 100;
@@ -111,6 +113,7 @@ impl Discovery {
                                 if let Some(sent) = self.iblt_sent.remove(&pid) {
                                     iblt.substract(&sent);
                                 }
+                                let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
                                 let mut db = self.db.lock().unwrap();
                                 let mut tx = db.transaction();
                                 for entry in iblt.into_iter() {
@@ -118,7 +121,8 @@ impl Discovery {
                                         match entry {
                                             IBLTEntry::Deleted(addr) => {
                                                 if let Ok(addr) = addr.socket_address() {
-                                                    tx.store_address("biadnet", &addr, 0, 0).expect("can not store addresses");
+                                                    debug!("Received and stored new address {} from peer={}", addr, pid);
+                                                    tx.store_address("biadnet", &addr, now, 0).expect("can not store addresses");
                                                 }
                                             }
                                             _ => {}
@@ -137,6 +141,22 @@ impl Discovery {
                 }
             }
             self.timeout.lock().unwrap().check(vec!(ExpectedReply::PollAddress, ExpectedReply::AddressIBLT));
+            if SystemTime::now().duration_since(last_polled).unwrap().as_secs() > POLL_FREQUENCY {
+                last_polled = SystemTime::now();
+                let mut db = self.db.lock().unwrap();
+                let mut tx = db.transaction();
+                let (sketch, size) = tx.compute_address_sketch(10).expect("can not compute address sketch");
+                let poll = PollAddressMessage {
+                    sketch,
+                    size
+                };
+
+                if let Some(pid) = self.p2p.send_random_network(Message::PollAddress(poll.clone())) {
+                    debug!("poll for addresses peer={}", pid);
+                    self.poll_asked.insert(pid, poll.clone());
+                    self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::PollAddress);
+                }
+            }
         }
     }
 
