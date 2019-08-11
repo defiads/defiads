@@ -50,6 +50,7 @@ mod iblt;
 mod messages;
 mod content;
 mod funding;
+mod discovery;
 pub mod api;
 pub mod find_peers;
 pub mod store;

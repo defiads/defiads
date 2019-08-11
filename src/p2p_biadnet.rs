@@ -46,7 +46,8 @@ use murmel::{
 use rand::{RngCore, thread_rng};
 
 use crate::find_peers::seed;
-use crate::messages::{Message, Envelope, VersionMessage, NetAddress};
+use crate::messages::{Message, Envelope, VersionMessage};
+use crate::discovery::NetAddress;
 use crate::updater::Updater;
 
 use serde_cbor::Deserializer;

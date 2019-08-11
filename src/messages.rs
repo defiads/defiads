@@ -20,9 +20,10 @@ use murmel::p2p::{Command, Version, VersionCarrier};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::io;
 use crate::error::BiadNetError;
-use crate::iblt::IBLT;
+use crate::iblt::{IBLT, IBLTKey};
 use crate::content::ContentKey;
 use crate::content::Content;
+use crate::discovery::NetAddress;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Envelope {
@@ -35,8 +36,10 @@ impl Command for Envelope {
         match self.payload {
             Message::Version(_) => "version",
             Message::Verack => "verack",
+            Message::PollAddress(_) => "poll address",
+            Message::AddressIBLT(_) => "address iblt",
             Message::PollContent(_) => "poll content",
-            Message::IBLT(_,_) => "iblt",
+            Message::ContentIBLT(_, _) => "content iblt",
             Message::Get(_) => "get",
             Message::Content(_) => "content"
         }.to_string()
@@ -48,8 +51,10 @@ impl Command for Envelope {
 pub enum Message {
     Version(VersionMessage),
     Verack,
+    PollAddress(PollAddressMessage),
+    AddressIBLT(IBLT<NetAddress>),
     PollContent(PollContentMessage),
-    IBLT(sha256d::Hash, IBLT<ContentKey>),
+    ContentIBLT(sha256d::Hash, IBLT<ContentKey>),
     Get(Vec<sha256::Hash>),
     Content(Content)
 }
@@ -82,58 +87,6 @@ impl Version for Message {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, Clone)]
-pub struct NetAddress {
-    /// Network byte-order ipv6 address, or ipv4-mapped ipv6 address
-    pub address: [u16; 8],
-    /// Network port
-    pub port: u16
-}
-
-const ONION : [u16; 3] = [0xFD87, 0xD87E, 0xEB43];
-
-impl NetAddress {
-    /// Create an address message for a socket
-    pub fn new (socket :&SocketAddr) -> NetAddress {
-        let (address, port) = match socket {
-            &SocketAddr::V4(ref addr) => (addr.ip().to_ipv6_mapped().segments(), addr.port()),
-            &SocketAddr::V6(ref addr) => (addr.ip().segments(), addr.port())
-        };
-        NetAddress { address: address, port: port }
-    }
-
-
-    pub fn socket_address(&self) -> Result<SocketAddr, BiadNetError> {
-        let addr = &self.address;
-        if addr[0..3] == ONION[0..3] {
-            return Err(BiadNetError::IO(io::Error::from(io::ErrorKind::AddrNotAvailable)));
-        }
-        let ipv6 = Ipv6Addr::new(
-            addr[0],addr[1],addr[2],addr[3],
-            addr[4],addr[5],addr[6],addr[7]
-        );
-        if let Some(ipv4) = ipv6.to_ipv4() {
-            Ok(SocketAddr::V4(SocketAddrV4::new(ipv4, self.port)))
-        }
-        else {
-            Ok(SocketAddr::V6(SocketAddrV6::new(ipv6, self.port, 0, 0)))
-        }
-    }
-
-    pub fn to_string(&self) -> Result<String, BiadNetError> {
-        Ok(format!("{}", self.socket_address()?))
-    }
-
-    pub fn from_str(s: &str) -> Result<NetAddress, BiadNetError> {
-        use std::str::FromStr;
-
-        let (address, port) = match SocketAddr::from_str(s)? {
-            SocketAddr::V4(ref addr) => (addr.ip().to_ipv6_mapped().segments(), addr.port()),
-            SocketAddr::V6(ref addr) => (addr.ip().segments(), addr.port())
-        };
-        Ok(NetAddress { address, port })
-    }
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct VersionMessage {
@@ -151,6 +104,14 @@ pub struct VersionMessage {
 pub struct PollContentMessage {
     /// known chain tip of Bitcoin
     pub tip: sha256d::Hash,
+    /// min sketch of own id set
+    pub sketch: Vec<u64>,
+    /// own set size
+    pub size: u32
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PollAddressMessage {
     /// min sketch of own id set
     pub sketch: Vec<u64>,
     /// own set size

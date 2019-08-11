@@ -90,7 +90,7 @@ impl Updater {
                                                 let iblt = store.get_iblt(size).expect("could not compute IBLT").clone();
                                                 self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::IBLT);
                                                 debug!("ask IBLT of size {} from peer={}", size, pid);
-                                                self.p2p.send_network(pid, Message::IBLT(our_tip, iblt));
+                                                self.p2p.send_network(pid, Message::ContentIBLT(our_tip, iblt));
                                             }
                                             else {
                                                 debug!("in sync with peer={}", pid);
@@ -110,7 +110,7 @@ impl Updater {
                                     self.poll_content(pid)
                                 }
                             },
-                            Message::IBLT(tip, mut iblt) => {
+                            Message::ContentIBLT(tip, mut iblt) => {
                                 self.timeout.lock().unwrap().received(pid, 1, ExpectedReply::IBLT);
                                 debug!("received IBLT from peer={}", pid);
                                 let mut store = self.store.write().unwrap();
