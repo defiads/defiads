@@ -26,7 +26,6 @@ use bitcoin::{
     BlockHeader
 };
 use bitcoin_hashes::sha256d;
-use bitcoin_wallet::trunk::Trunk;
 use future::Future;
 use futures::{future, Never, Async, Poll, task,
               executor::{Executor, ThreadPool}
@@ -60,6 +59,7 @@ use std::collections::HashMap;
 use murmel::p2p::PeerId;
 use std::time::Duration;
 use futures::task::Waker;
+use crate::trunk::Trunk;
 
 const MAGIC: u32 = 0xB1AD;
 const MAX_PROTOCOL_VERSION: u32 = 1;
