@@ -19,11 +19,9 @@
 extern crate clap;
 extern crate toml;
 extern crate base64;
-use clap::{Arg, App, SubCommand};
+use clap::{Arg, App};
 
-use log::Level;
 use simplelog;
-use std::env::args;
 
 use futures::{
     future, Never,
@@ -35,11 +33,9 @@ use biadne::p2p_bitcoin::{ChainDBTrunk, P2PBitcoin};
 use biadne::p2p_biadnet::P2PBiadNet;
 use biadne::db::DB;
 use biadne::store::ContentStore;
-use biadne::find_peers::BIADNET_PORT;
 use futures::future::Empty;
 use murmel::chaindb::ChainDB;
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::{Arc,RwLock, Mutex};
@@ -47,9 +43,7 @@ use std::thread;
 use biadne::api::start_api;
 use std::fs;
 use std::time::SystemTime;
-use std::alloc::System;
 use rand::{thread_rng, RngCore};
-use std::path::Path;
 use std::time::UNIX_EPOCH;
 use log_panics;
 

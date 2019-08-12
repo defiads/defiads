@@ -59,7 +59,6 @@ use murmel::p2p::PeerId;
 use std::collections::HashMap;
 use std::time::Duration;
 use futures::task::Waker;
-use std::time::{UNIX_EPOCH};
 use crate::trunk::Trunk;
 
 

@@ -2,7 +2,6 @@ use jsonrpc_http_server::{ServerBuilder};
 use jsonrpc_http_server::jsonrpc_core::{IoHandler, Value, Params, Error};
 use std::net::SocketAddr;
 use crate::store::SharedContentStore;
-use futures::StreamExt;
 
 fn parse_arguments (p: Params, api_key: &str) -> Result<Vec<String>, Error> {
     let mut result = Vec::new();

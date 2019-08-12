@@ -33,7 +33,6 @@ use crate::messages::{PollAddressMessage, Message};
 use crate::error::BiadNetError;
 use crate::iblt::{IBLTKey, estimate_diff_size, IBLT, IBLTEntry};
 use crate::db::SharedDB;
-use serde_cbor::error::Category::Syntax;
 use std::time::UNIX_EPOCH;
 
 

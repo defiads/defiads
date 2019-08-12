@@ -28,7 +28,6 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
 use rand::{thread_rng, Rng};
 use crate::content::Content;
-use crate::ad::Ad;
 use serde_cbor;
 use rusqlite::NO_PARAMS;
 use crate::iblt::IBLT;

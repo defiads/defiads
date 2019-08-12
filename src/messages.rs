@@ -17,10 +17,7 @@
 //! P2P messages
 use crate::bitcoin_hashes::{sha256, sha256d};
 use murmel::p2p::{Command, Version, VersionCarrier};
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
-use std::io;
-use crate::error::BiadNetError;
-use crate::iblt::{IBLT, IBLTKey};
+use crate::iblt::{IBLT};
 use crate::content::ContentKey;
 use crate::content::Content;
 use crate::discovery::NetAddress;
