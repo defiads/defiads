@@ -19,7 +19,6 @@
 use bitcoin::{BlockHeader, BitcoinHash};
 use bitcoin_hashes::{sha256, sha256d};
 use secp256k1::{Secp256k1, All};
-use bitcoin_wallet::trunk::Trunk;
 use std::sync::{RwLock, Arc};
 
 use crate::error::BiadNetError;
@@ -31,6 +30,7 @@ use crate::content::ContentKey;
 
 use std::collections::HashMap;
 use crate::iblt::add_to_min_sketch;
+use crate::trunk::Trunk;
 
 const MIN_SKETCH_SIZE: usize = 20;
 
