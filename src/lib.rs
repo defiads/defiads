@@ -52,6 +52,7 @@ mod content;
 mod funding;
 mod discovery;
 mod trunk;
+mod blockdownload;
 pub mod wallet;
 pub mod api;
 pub mod find_peers;

@@ -16,7 +16,7 @@
 
 //! store
 
-use bitcoin::{BlockHeader, BitcoinHash};
+use bitcoin::{BlockHeader, BitcoinHash, Block};
 use bitcoin_hashes::{sha256, sha256d};
 use secp256k1::{Secp256k1, All};
 use std::sync::{RwLock, Arc};
@@ -98,6 +98,12 @@ impl ContentStore {
         Ok(self.iblts.entry(size).or_insert(tx.compute_content_iblt(size)?))
     }
 
+    pub fn block_connected(&mut self, block: &Block, height: u32) -> Result<(), BiadNetError> {
+        // TODO
+        self.wallet.process(block);
+        Ok(())
+    }
+
     /// add a header to the tip of the chain
     pub fn add_header(&mut self, height: u32, header: &BlockHeader) -> Result<(), BiadNetError> {
         info!("new chain tip at height {} {}", height, header.bitcoin_hash());
@@ -139,6 +145,7 @@ impl ContentStore {
             self.n_keys = n;
         }
         tx.commit();
+        self.wallet.unwind_tip(&header.bitcoin_hash());
         return Ok(())
     }
 

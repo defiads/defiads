@@ -14,12 +14,16 @@
 // limitations under the License.
 //
 use bitcoin::network::constants::Network;
+use bitcoin_hashes::sha256d;
 use bitcoin_wallet::account::{MasterAccount, Unlocker, AccountAddressType, Account, MasterKeyEntropy};
 use bitcoin::util::bip32::ExtendedPubKey;
+use bitcoin::{Block, OutPoint, TxOut};
+use bitcoin_wallet::proved::ProvedTransaction;
 
 const KEY_LOOK_AHEAD: u32 = 10;
 
 pub struct Wallet {
+    wallet: bitcoin_wallet::wallet::Wallet,
     master: MasterAccount,
     look_ahead: u32
 }
@@ -41,9 +45,26 @@ impl Wallet {
         self.look_ahead
     }
 
+    pub fn unwind_tip(&mut self, block_hash: &sha256d::Hash) {
+        self.wallet.unwind_tip(block_hash)
+    }
+
+    pub fn process(&mut self, block: &Block) {
+        self.wallet.process(&mut self.master, block)
+    }
+
+    pub fn prove (&self, txid: &sha256d::Hash) -> Option<&ProvedTransaction> {
+        self.wallet.prove(txid)
+    }
+
+    pub fn get_coins<V> (&self,  minimum: u64, filter: V) -> Vec<(OutPoint, TxOut, u32, u32, u32, Option<Vec<u8>>)>
+        where V: Fn(&sha256d::Hash, &OutPoint, &TxOut, &u32, &u32, &u32, &Option<Vec<u8>>) -> bool {
+        self.wallet.get_coins(minimum, filter)
+    }
+
     pub fn from_encrypted(encrypted: &[u8], public_master_key: ExtendedPubKey, birth: u64, look_ahead: u32) -> Wallet {
         let master = MasterAccount::from_encrypted(encrypted, public_master_key, birth);
-        Wallet {master, look_ahead}
+        Wallet {wallet: bitcoin_wallet::wallet::Wallet::new(), master, look_ahead}
     }
 
     pub fn new(bitcoin_network: Network) -> Wallet {
@@ -89,6 +110,7 @@ impl Wallet {
         eprintln!();
         Wallet {
             master,
+            wallet: bitcoin_wallet::wallet::Wallet::new(),
             look_ahead: KEY_LOOK_AHEAD
         }
     }

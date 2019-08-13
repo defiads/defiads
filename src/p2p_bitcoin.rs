@@ -308,7 +308,9 @@ struct BitcoinDriver {
 }
 
 impl Downstream for BitcoinDriver {
-    fn block_connected(&mut self, _block: &Block, _height: u32) {}
+    fn block_connected(&mut self, block: &Block, height: u32) {
+        self.store.write().unwrap().block_connected(block, height).expect("can not add block");
+    }
 
     fn header_connected(&mut self, block: &BlockHeader, height: u32) {
         self.store.write().unwrap().add_header(height, block).expect("can not add header");
