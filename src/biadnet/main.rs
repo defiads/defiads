@@ -19,6 +19,7 @@
 extern crate clap;
 extern crate toml;
 extern crate base64;
+extern crate hex;
 use clap::{Arg, App};
 
 use simplelog;
@@ -47,13 +48,19 @@ use rand::{thread_rng, RngCore};
 use std::time::UNIX_EPOCH;
 use log_panics;
 use biadne::find_peers::BIADNET_PORT;
+use bitcoin_wallet::account::{MasterAccount, MasterKeyEntropy, Unlocker, Account, AccountAddressType};
+use bitcoin::util::bip32::ExtendedPubKey;
 
 const HTTP_RPC: &str = "127.0.0.1";
 const BIADNET_LISTEN: &str = "0.0.0.0"; // this also implies ipv6 [::]
+const KEY_LOOK_AHEAD: u32 = 10;
 
 #[derive(Serialize, Deserialize)]
 struct Config {
     apikey: String,
+    encryptedwalletkey: String,
+    keyroot: String,
+    lookahead: u32,
     birth: u64
 }
 
@@ -168,7 +175,7 @@ pub fn main () {
     log_config.filter_ignore = Some(&["tokio_reactor"]);
     simplelog::CombinedLogger::init(
         vec![
-            simplelog::TermLogger::new(log::LevelFilter::Warn, simplelog::Config::default(), simplelog::TerminalMode::Mixed).unwrap(),
+            simplelog::TermLogger::new(log::LevelFilter::Warn, simplelog::Config::default(), simplelog::TerminalMode::Stderr).unwrap(),
             simplelog::WriteLogger::new(level, log_config, std::fs::File::create(log_file).unwrap()),
         ]
     ).unwrap();
@@ -209,30 +216,81 @@ pub fn main () {
 
     let storage_limit = matches.value_of("storage-limit").unwrap().parse::<u64>().expect("expecting number of GB") * 1000*1000;
 
+    let config_path = std::path::Path::new(matches.value_of("config").unwrap());
+    let config = if let Ok(config_string) = fs::read_to_string( config_path) {
+        toml::from_str::<Config>(config_string.as_str()).expect("can not parse config file")
+    } else {
+        eprintln!();
+        eprintln!("============================= Initializing bitcoin wallet =================================");
+        eprintln!("The randomly generated key for your wallet will be stored ENCRYPTED in the config-file");
+        eprintln!();
+        eprint!("Set wallet encryption password (minimum length 8):");
+        let mut password = String::new();
+        std::io::stdin().read_line(&mut password).expect("expecting a password");
+        password.remove(password.len()-1); // remove EOL
+        assert!(password.len() >= 8, "Password should have at least 8 characters");
+        let mut apikey = [0u8;12];
+        thread_rng().fill_bytes(&mut apikey);
+        let bitcoin_wallet = MasterAccount::new(MasterKeyEntropy::Recommended, bitcoin_network,
+                                                password.as_str(), None).expect("can not generate wallet");
+        let mut unlocker = Unlocker::new(bitcoin_wallet.encrypted().as_slice(),
+                              password.as_str(), None, bitcoin_network,
+                              Some(&bitcoin_wallet.master_public())).expect("Internal error in wallet generation");
+        let first = Account::new(&mut unlocker, AccountAddressType::P2SHWPKH, 0, 0, KEY_LOOK_AHEAD)
+            .expect("can not create first account");
+        let first_address = first.get_key(0).unwrap().address.clone();
+        eprintln!();
+        eprintln!("You will need the encryption password to use the funds with biadnet.");
+        eprintln!();
+        eprintln!("Uncommitted funds in the wallet can also be accessed with programs and devices");
+        eprintln!("compatible with BIP32, BIP39, BIP44, BIP49, BIP84, such as TREZOR or Ledger");
+        eprintln!();
+        eprintln!("Write down the following human readable key,");
+        eprintln!("to evtl. restore your biadnet wallet or import into compatible programs and devices.");
+        eprintln!();
+        for (i, word) in bitcoin_wallet.mnemonic(password.as_str()).unwrap().iter().enumerate() {
+            eprintln!("{} {}", i+1, word);
+        }
+        eprintln!();
+        eprintln!("Compatible programs and devices should show if initialized with above key,");
+        eprintln!("this first receiver address (BIP44 keypath: m/49'/0'/0/0): {}", first_address);
+        eprintln!();
+        eprint!("Did you write above words down, then answer with yes:");
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer).expect("expecting yes");
+        answer.remove(answer.len()-1); // remove EOL
+        assert_eq!(answer, "yes", "expecting yes");
+        eprintln!("===========================================================================================");
+        eprintln!();
+        let config = Config {
+            apikey: base64::encode(&apikey),
+            encryptedwalletkey: hex::encode(bitcoin_wallet.encrypted().as_slice()),
+            keyroot: bitcoin_wallet.master_public().to_string(),
+            birth: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            lookahead: KEY_LOOK_AHEAD
+        };
+        fs::write(config_path, toml::to_string(&config).unwrap()).expect("can not write config file");
+        config
+    };
+
+    let bitcoin_wallet = MasterAccount::from_encrypted(
+        hex::decode(config.encryptedwalletkey).unwrap().as_slice(),
+        ExtendedPubKey::from_str(config.keyroot.as_str()).expect("can not decode key root"),
+        config.birth);
+
+    eprintln!("Starting biadnet.");
+    eprintln!("Observe progress in the log file.");
+    eprintln!("Warnings and errors will be also printed to stderr.");
+
     let mut chaindb = ChainDB::new(db_path, bitcoin_network, 0).expect("can not open chain db");
     chaindb.init(false).expect("can not initialize db");
     let chaindb = Arc::new(RwLock::new(chaindb));
-
 
     let mut db = DB::new(db_path).expect("can not open db");
     let mut tx = db.transaction();
     tx.create_tables();
     tx.commit();
     let db = Arc::new(Mutex::new(db));
-
-    let config_path = std::path::Path::new(matches.value_of("config").unwrap());
-    let config = if let Ok(config_string) = fs::read_to_string( config_path) {
-        toml::from_str::<Config>(config_string.as_str()).expect("can not parse config file")
-    } else {
-        let mut random = [0u8;12];
-        thread_rng().fill_bytes(&mut random);
-        let config = Config {
-            apikey: base64::encode(&random),
-            birth: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
-        };
-        fs::write(config_path, toml::to_string(&config).unwrap()).expect("can not write config file");
-        config
-    };
 
     let content_store =
         Arc::new(RwLock::new(ContentStore::new(db.clone(), storage_limit,
@@ -242,8 +300,9 @@ pub fn main () {
     if let Some(http) = http_rpc {
         let address = http.clone();
         let store = content_store.clone();
+        let apikey = config.apikey.clone();
         thread::Builder::new().name("http".to_string()).spawn(
-            move || start_api(&address, store, config.apikey)).expect("can not start http api");
+            move || start_api(&address, store, apikey)).expect("can not start http api");
     }
 
     let mut thread_pool = ThreadPoolBuilder::new().name_prefix("futures ").create().expect("can not start thread pool");
