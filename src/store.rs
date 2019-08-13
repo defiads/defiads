@@ -31,6 +31,7 @@ use crate::content::ContentKey;
 use std::collections::HashMap;
 use crate::iblt::add_to_min_sketch;
 use crate::trunk::Trunk;
+use crate::wallet::Wallet;
 
 const MIN_SKETCH_SIZE: usize = 20;
 
@@ -45,12 +46,13 @@ pub struct ContentStore {
     iblts: HashMap<u32, IBLT<ContentKey>>,
     min_sketch: Vec<u64>,
     ksequence: Vec<(u64, u64)>,
-    n_keys: u32
+    n_keys: u32,
+    wallet: Wallet
 }
 
 impl ContentStore {
     /// new content store
-    pub fn new(db: SharedDB, storage_limit: u64, trunk: Arc<dyn Trunk + Send + Sync>) -> Result<ContentStore, BiadNetError> {
+    pub fn new(db: SharedDB, storage_limit: u64, trunk: Arc<dyn Trunk + Send + Sync>, wallet: Wallet) -> Result<ContentStore, BiadNetError> {
         let mut mins;
         let ksequence;
         let n_keys;
@@ -70,7 +72,8 @@ impl ContentStore {
             iblts: HashMap::new(),
             min_sketch: mins,
             ksequence,
-            n_keys
+            n_keys,
+            wallet
         })
     }
 

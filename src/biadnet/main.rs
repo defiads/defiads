@@ -251,8 +251,10 @@ pub fn main () {
     let db = Arc::new(Mutex::new(db));
 
     let content_store =
-        Arc::new(RwLock::new(ContentStore::new(db.clone(), storage_limit,
-                                               Arc::new(ChainDBTrunk{chaindb: chaindb.clone()}))
+        Arc::new(RwLock::new(
+            ContentStore::new(db.clone(), storage_limit,
+                              Arc::new(ChainDBTrunk{chaindb: chaindb.clone()}),
+                              bitcoin_wallet)
             .expect("can not initialize content store")));
 
     if let Some(http) = http_rpc {
