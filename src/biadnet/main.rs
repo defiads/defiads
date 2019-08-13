@@ -46,10 +46,10 @@ use std::time::SystemTime;
 use rand::{thread_rng, RngCore};
 use std::time::UNIX_EPOCH;
 use log_panics;
+use biadne::find_peers::BIADNET_PORT;
 
-
-const HTTP_RPC: &str = "127.0.0.1:21767";
-const BIADNET_LISTEN: &str = "0.0.0.0:21766";
+const HTTP_RPC: &str = "127.0.0.1";
+const BIADNET_LISTEN: &str = "0.0.0.0"; // this also implies ipv6 [::]
 
 #[derive(Serialize, Deserialize)]
 struct Config {
@@ -59,6 +59,9 @@ struct Config {
 
 pub fn main () {
     log_panics::init();
+
+    let biadnet_listen = (BIADNET_LISTEN.to_string() + ":") + (BIADNET_PORT.to_string().as_str());
+    let http_rpc = (HTTP_RPC.to_string() + ":") + ((BIADNET_PORT + 1).to_string().as_str());
 
     let matches = App::new("biadnet").version("0.1.0").author("tamas.blummer@protonmail.com")
         .about("Bitcoin Advertizing Network")
@@ -108,7 +111,7 @@ pub fn main () {
             .value_name("ADDRESS")
             .help("Listen to http-rpc on this address.")
             .takes_value(true)
-            .default_value(HTTP_RPC)
+            .default_value(http_rpc.as_str())
             .min_values(1))
         .arg(Arg::with_name("listen")
             .long("listen")
@@ -117,7 +120,7 @@ pub fn main () {
             .help("Listen to incoming biadnet connections")
             .takes_value(true)
             .use_delimiter(true)
-            .default_value(BIADNET_LISTEN)
+            .default_value(biadnet_listen.as_str())
             .min_values(1))
         .arg(Arg::with_name("db")
             .value_name("FILE")
