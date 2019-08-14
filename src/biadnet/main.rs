@@ -234,10 +234,12 @@ pub fn main () {
         );
         {
             let mut tx = db.transaction();
-            for i in 0..3 {
-                let account = tx.read_account(i, bitcoin_network).expect("can not read account 0");
-                master_account.add_account(account);
-            }
+            let account = tx.read_account(0, 0, bitcoin_network).expect("can not read account 0/0");
+            master_account.add_account(account);
+            let account = tx.read_account(0, 1, bitcoin_network).expect("can not read account 0/1");
+            master_account.add_account(account);
+            let account = tx.read_account(1, 0, bitcoin_network).expect("can not read account 1/0");
+            master_account.add_account(account);
             bitcoin_wallet = tx.read_wallet(master_account, config.lookahead).expect("can not read wallet");
         }
     } else {
