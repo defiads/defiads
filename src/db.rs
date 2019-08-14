@@ -224,7 +224,7 @@ impl<'db> TX<'db> {
     }
 
     pub fn read_account(&mut self, account_number: u32, sub: u32, network: Network) -> Result<Account, BiadNetError> {
-        debug!("read account {}", account_number);
+        debug!("read account {}/{}", account_number, sub);
         Ok(self.tx.query_row(r#"
             select address_type,  master, instantiated, next, look_ahead from account where account_number = ?1 and sub = ?2
         "#, &[&account_number as &ToSql, &sub], |r| {
