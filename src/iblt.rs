@@ -462,7 +462,7 @@ mod test {
         let (b_sketch, _, _) = min_sketch(10, k0, k1, &mut b.iter().cloned());
         let bl = b.len() as u32;
 
-        let buckets = estimate_diff_size(a_sketch.as_slice(), al, b_sketch.as_slice(), bl)*3/2;
+        let buckets = estimate_diff_size(a_sketch.as_slice(), al, b_sketch.as_slice(), bl)*2;
 
         let mut a_iblt = IBLT::new(buckets, 4, k0, k1);
         for id in a.iter() {

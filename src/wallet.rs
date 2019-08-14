@@ -19,11 +19,12 @@ use bitcoin_wallet::account::{MasterAccount, Unlocker, AccountAddressType, Accou
 use bitcoin::util::bip32::ExtendedPubKey;
 use bitcoin::{Block, OutPoint, TxOut};
 use bitcoin_wallet::proved::ProvedTransaction;
+use bitcoin_wallet::coins::Coins;
 
 const KEY_LOOK_AHEAD: u32 = 10;
 
 pub struct Wallet {
-    wallet: bitcoin_wallet::wallet::Wallet,
+    coins: Coins,
     master: MasterAccount,
     look_ahead: u32
 }
@@ -45,26 +46,29 @@ impl Wallet {
         self.look_ahead
     }
 
+    pub fn coins(&self) -> &Coins {
+        &self.coins
+    }
+
     pub fn unwind_tip(&mut self, block_hash: &sha256d::Hash) {
-        self.wallet.unwind_tip(block_hash)
+        self.coins.unwind_tip(block_hash)
     }
 
     pub fn process(&mut self, block: &Block) {
-        self.wallet.process(&mut self.master, block)
+        self.coins.process(&mut self.master, block)
     }
 
     pub fn prove (&self, txid: &sha256d::Hash) -> Option<&ProvedTransaction> {
-        self.wallet.prove(txid)
+        self.coins.proofs().get(txid)
     }
 
-    pub fn get_coins<V> (&self,  minimum: u64, filter: V) -> Vec<(OutPoint, TxOut, u32, u32, u32, Option<Vec<u8>>)>
-        where V: Fn(&sha256d::Hash, &OutPoint, &TxOut, &u32, &u32, &u32, &Option<Vec<u8>>) -> bool {
-        self.wallet.get_coins(minimum, filter)
+    pub fn from_storage(coins: Coins, master: MasterAccount, look_ahead: u32) -> Wallet {
+        Wallet { coins, master, look_ahead }
     }
 
     pub fn from_encrypted(encrypted: &[u8], public_master_key: ExtendedPubKey, birth: u64, look_ahead: u32) -> Wallet {
         let master = MasterAccount::from_encrypted(encrypted, public_master_key, birth);
-        Wallet {wallet: bitcoin_wallet::wallet::Wallet::new(), master, look_ahead}
+        Wallet { coins: Coins::new(), master, look_ahead}
     }
 
     pub fn new(bitcoin_network: Network) -> Wallet {
@@ -110,7 +114,7 @@ impl Wallet {
         eprintln!();
         Wallet {
             master,
-            wallet: bitcoin_wallet::wallet::Wallet::new(),
+            coins: Coins::new(),
             look_ahead: KEY_LOOK_AHEAD
         }
     }

@@ -25,7 +25,7 @@ use crate::error::BiadNetError;
 use std::time::SystemTime;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use rand::{thread_rng, Rng};
 use crate::content::Content;
 use serde_cbor;
@@ -35,12 +35,16 @@ use crate::content::ContentKey;
 use crate::iblt::min_sketch;
 use rand_distr::Poisson;
 use crate::text::Text;
-use bitcoin::{PublicKey, OutPoint, TxOut};
+use bitcoin::{PublicKey, OutPoint, TxOut, Script};
 use std::time::UNIX_EPOCH;
 use crate::discovery::NetAddress;
-use bitcoin_wallet::account::{AccountAddressType, InstantiatedKey, Account};
+use bitcoin_wallet::account::{AccountAddressType, InstantiatedKey, Account, MasterAccount, KeyDerivation};
 use bitcoin::util::bip32::ExtendedPubKey;
 use bitcoin::network::constants::Network;
+use crate::wallet::Wallet;
+use bitcoin_wallet::coins::{Coin, Coins};
+use bitcoin_wallet::proved::ProvedTransaction;
+use secp256k1::ffi::secp256k1_ecdh_hash_function_default;
 
 pub type SharedDB = Arc<Mutex<DB>>;
 
@@ -125,9 +129,74 @@ impl<'db> TX<'db> {
                 sub number,
                 kix number,
                 tweak text,
+                proof blob,
                 primary key(txid, vout)
             ) without rowid
         "#).expect("failed to create db tables");
+    }
+
+    pub fn store_wallet(&mut self, wallet: &Wallet) -> Result<(), BiadNetError> {
+        self.tx.execute (r#"
+            delete from coins;
+        "#, NO_PARAMS)?;
+        let mut statement = self.tx.prepare(r#"
+            insert into coins (txid, vout, value, script, account, sub, kix, tweak, proof)
+            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "#)?;
+        let proofs = wallet.coins().proofs();
+        for (outpoint, coin) in wallet.coins().owned() {
+            let tweak = if let Some(ref tweak) = coin.derivation.tweak {
+                    hex::encode(tweak)
+                }
+                else {
+                    String::new()
+                };
+            let proof = proofs.get(&outpoint.txid).expect("inconsistent wallet, missing proof");
+            statement.execute(&[
+                &outpoint.txid.to_string() as &ToSql, &outpoint.vout,
+                &(coin.output.value as i64), &coin.output.script_pubkey.to_bytes(),
+                &coin.derivation.account, &coin.derivation.sub, &coin.derivation.kix, &tweak,
+                &serde_cbor::ser::to_vec(&proof).expect("can not serialize proof")
+            ])?;
+        }
+        Ok(())
+    }
+
+    pub fn read_wallet(&mut self, master: MasterAccount, look_ahead: u32) -> Result<Wallet, BiadNetError> {
+        let mut query = self.tx.prepare(r#"
+            select txid, vout, value, script, account, sub, kix, tweak, proof from coins
+        "#)?;
+        let mut coins = Coins::new();
+        for r in query.query_map::<(OutPoint, Coin, ProvedTransaction),&[&ToSql],_> (NO_PARAMS, |r| {
+            Ok((
+                OutPoint{ txid: sha256d::Hash::from_hex(r.get_unwrap::<usize, String>(0).as_str()).expect("transaction id not hex"),
+                    vout: r.get_unwrap::<usize, u32>(1)},
+                Coin{
+                    output: TxOut{script_pubkey: Script::from(r.get_unwrap::<usize,Vec<u8>>(3)),
+                        value: r.get_unwrap::<usize, i32>(2) as u64},
+                    derivation: KeyDerivation {
+                        account: r.get_unwrap::<usize, u32> (4),
+                        sub: r.get_unwrap::<usize, u32> (5),
+                        kix: r.get_unwrap::<usize, u32> (6),
+                        tweak: {
+                            let tweak = r.get_unwrap::<usize, String>(7);
+                            if tweak.len() == 0 {
+                                None
+                            }
+                            else {
+                                Some(hex::decode(tweak).expect("tweak not hex"))
+                            }
+                        }
+                    }
+                },
+                serde_cbor::from_slice(r.get_unwrap::<usize, Vec<u8>>(8).as_slice()).expect("can not deserialize stored proof")
+                ))
+        })? {
+            if let Ok((point, coin, proof)) = r {
+                coins.add_from_storage(point, coin, proof);
+            }
+        }
+        Ok(Wallet::from_storage(coins, master, look_ahead))
     }
 
     pub fn store_account(&mut self, account: &Account) -> Result<usize, BiadNetError> {
@@ -137,7 +206,7 @@ impl<'db> TX<'db> {
             values (?1, ?2, ?3, ?4, ?5, ?6, ?7)
         "#, &[&account.account_number() as &ToSql,
             &account.address_type().as_u32(), &account.sub_account_number(), &account.master_public().to_string(),
-            &account.next(), &account.look_ahead(), &serde_cbor::ser::to_vec_packed(&account.instantiated())?]
+            &account.next(), &account.look_ahead(), &serde_cbor::ser::to_vec(&account.instantiated())?]
         )?)
     }
 
@@ -156,11 +225,6 @@ impl<'db> TX<'db> {
                 network
             ))
         })?)
-    }
-
-    pub fn store_coin(&mut self, point: OutPoint, output: TxOut, account: u32, sub: u32, kix: u32, tweak: Option<Vec<u8>>) -> Result<(), BiadNetError> {
-        // TODO
-        Ok(())
     }
 
     pub fn compute_content_iblt(&mut self, len: u32) -> Result<IBLT<ContentKey>, BiadNetError> {
@@ -225,8 +289,8 @@ impl<'db> TX<'db> {
     pub fn store_content(&mut self, height: u32, block_id: &sha256d::Hash, c: &Content, amount: u64) -> Result<usize, BiadNetError> {
         let id = c.ad.digest();
         let ser_ad = c.ad.serialize();
-        let proof = serde_cbor::ser::to_vec_packed(&c.funding).unwrap();
-        let publisher = serde_cbor::ser::to_vec_packed(&c.funder).unwrap();
+        let proof = serde_cbor::ser::to_vec(&c.funding).unwrap();
+        let publisher = serde_cbor::ser::to_vec(&c.funder).unwrap();
         let length = c.length();
         debug!("store content {}", id);
         Ok(self.tx.execute(r#"
@@ -546,6 +610,33 @@ mod test {
             let account = Account::new(&mut unlocker, AccountAddressType::P2SHWPKH, 1, 2, 10).unwrap();
             tx.store_account(&account).unwrap();
             tx.read_account(1, Network::Bitcoin).unwrap();
+
+            let genesis = genesis_block(Network::Bitcoin);
+
+            let mut coins = Coins::new();
+            coins.add_from_storage(
+                OutPoint {
+                    txid: genesis.txdata[0].bitcoin_hash(),
+                    vout: 0
+                },
+                Coin{
+                    output: TxOut{
+                        script_pubkey: Script::new(),
+                        value: 50000000
+                    },
+                    derivation: KeyDerivation {
+                        tweak: None,
+                        account: 1,
+                        sub: 2,
+                        kix: 3
+                    }
+                },
+                ProvedTransaction::new(&genesis, 0));
+            let wallet = Wallet::from_storage(coins, master, 10);
+            tx.store_wallet(&wallet).unwrap();
+            let master = MasterAccount::new(MasterKeyEntropy::Recommended, Network::Bitcoin, "", None).unwrap();
+            let other = tx.read_wallet(master, 10).unwrap();
+            assert!(*wallet.coins() == *other.coins());
             tx.commit();
         }
         {
