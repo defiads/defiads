@@ -35,9 +35,12 @@ use crate::content::ContentKey;
 use crate::iblt::min_sketch;
 use rand_distr::Poisson;
 use crate::text::Text;
-use bitcoin::PublicKey;
+use bitcoin::{PublicKey, OutPoint, TxOut};
 use std::time::UNIX_EPOCH;
 use crate::discovery::NetAddress;
+use bitcoin_wallet::account::{AccountAddressType, InstantiatedKey, Account};
+use bitcoin::util::bip32::ExtendedPubKey;
+use bitcoin::network::constants::Network;
 
 pub type SharedDB = Arc<Mutex<DB>>;
 
@@ -103,7 +106,61 @@ impl<'db> TX<'db> {
                 length number
             ) without rowid;
 
+            create table if not exists account (
+                account_number primary key,
+                address_type number,
+                sub number,
+                master text,
+                next number,
+                look_ahead number,
+                instantiated blob
+            ) without rowid;
+
+            create table if not exists coins (
+                txid text,
+                vout number,
+                value number,
+                script blob,
+                account number,
+                sub number,
+                kix number,
+                tweak text,
+                primary key(txid, vout)
+            ) without rowid
         "#).expect("failed to create db tables");
+    }
+
+    pub fn store_account(&mut self, account: &Account) -> Result<usize, BiadNetError> {
+        debug!("store account {}", account.account_number());
+        Ok(self.tx.execute(r#"
+            insert or replace into account (account_number, address_type, sub, master, next, look_ahead, instantiated)
+            values (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "#, &[&account.account_number() as &ToSql,
+            &account.address_type().as_u32(), &account.sub_account_number(), &account.master_public().to_string(),
+            &account.next(), &account.look_ahead(), &serde_cbor::ser::to_vec_packed(&account.instantiated())?]
+        )?)
+    }
+
+    pub fn read_account(&mut self, account_number: u32, network: Network) -> Result<Account, BiadNetError> {
+        Ok(self.tx.query_row(r#"
+            select address_type,  sub, master, instantiated, next, look_ahead from account where account_number = ?1
+        "#, &[&account_number as &ToSql], |r| {
+            Ok(Account::new_from_storage(
+                AccountAddressType::from_u32(r.get_unwrap::<usize, u32>(0)),
+                account_number,
+                r.get_unwrap::<usize, u32>(1),
+                ExtendedPubKey::from_str(r.get_unwrap::<usize, String>(2).as_str()).expect("malformed master public stored"),
+                serde_cbor::from_slice(r.get_unwrap::<usize, Vec<u8>>(3).as_slice()).expect("malformed instantiated keys stored"),
+                r.get_unwrap::<usize, u32>(4),
+                r.get_unwrap::<usize, u32>(5),
+                network
+            ))
+        })?)
+    }
+
+    pub fn store_coin(&mut self, point: OutPoint, output: TxOut, account: u32, sub: u32, kix: u32, tweak: Option<Vec<u8>>) -> Result<(), BiadNetError> {
+        // TODO
+        Ok(())
     }
 
     pub fn compute_content_iblt(&mut self, len: u32) -> Result<IBLT<ContentKey>, BiadNetError> {
@@ -458,6 +515,7 @@ mod test {
     use bitcoin::util::key::PublicKey;
     use crate::ad::Ad;
     use std::time::UNIX_EPOCH;
+    use bitcoin_wallet::account::{MasterAccount, MasterKeyEntropy, Unlocker};
 
     #[test]
     pub fn test_db () {
@@ -482,6 +540,12 @@ mod test {
             tx.store_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap(), 1, now).unwrap();
             // should not find if banned
             assert!(tx.get_an_address("biadnet", &HashSet::new()).unwrap().is_none());
+
+            let master = MasterAccount::new(MasterKeyEntropy::Recommended, Network::Bitcoin, "", None).unwrap();
+            let mut unlocker = Unlocker::new(master.encrypted().as_slice(), "", None, Network::Bitcoin, Some(master.master_public())).unwrap();
+            let account = Account::new(&mut unlocker, AccountAddressType::P2SHWPKH, 1, 2, 10).unwrap();
+            tx.store_account(&account).unwrap();
+            tx.read_account(1, Network::Bitcoin).unwrap();
             tx.commit();
         }
         {
