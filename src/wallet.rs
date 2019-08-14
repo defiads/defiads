@@ -17,15 +17,16 @@ use bitcoin::network::constants::Network;
 use bitcoin_hashes::sha256d;
 use bitcoin_wallet::account::{MasterAccount, Unlocker, AccountAddressType, Account, MasterKeyEntropy};
 use bitcoin::util::bip32::ExtendedPubKey;
-use bitcoin::{Block, OutPoint, TxOut};
+use bitcoin::{Block};
 use bitcoin_wallet::proved::ProvedTransaction;
 use bitcoin_wallet::coins::Coins;
 
 const KEY_LOOK_AHEAD: u32 = 10;
+const KEY_PURPOSE: u32 = 0xb1ad;
 
 pub struct Wallet {
     coins: Coins,
-    master: MasterAccount,
+    pub master: MasterAccount,
     look_ahead: u32
 }
 
@@ -81,14 +82,21 @@ impl Wallet {
         std::io::stdin().read_line(&mut password).expect("expecting a password");
         password.remove(password.len()-1); // remove EOL
         assert!(password.len() >= 8, "Password should have at least 8 characters");
-        let master = MasterAccount::new(MasterKeyEntropy::Recommended, bitcoin_network,
+        let mut master = MasterAccount::new(MasterKeyEntropy::Recommended, bitcoin_network,
                                                 password.as_str(), None).expect("can not generate wallet");
         let mut unlocker = Unlocker::new(master.encrypted().as_slice(),
                                          password.as_str(), None, bitcoin_network,
                                          Some(&master.master_public())).expect("Internal error in wallet generation");
-        let first = Account::new(&mut unlocker, AccountAddressType::P2SHWPKH, 0, 0, KEY_LOOK_AHEAD)
-            .expect("can not create first account");
-        let first_address = first.get_key(0).unwrap().address.clone();
+        let receiver = Account::new(&mut unlocker, AccountAddressType::P2SHWPKH, 0, 0, KEY_LOOK_AHEAD)
+            .expect("can not create receiver account");
+        master.add_account(receiver);
+        let change = Account::new(&mut unlocker, AccountAddressType::P2SHWPKH, 0, 1, KEY_LOOK_AHEAD)
+            .expect("can not create change account");
+        master.add_account(change);
+        let commitments = Account::new(&mut unlocker, AccountAddressType::P2WSH(KEY_PURPOSE), 1, 0, 0)
+            .expect("can not create commitments account");
+        master.add_account(commitments);
+        let receiver = master.get((0,0)).unwrap().get_key(0).unwrap().address.clone();
         eprintln!();
         eprintln!("You will need the encryption password to use the funds with biadnet.");
         eprintln!();
@@ -103,7 +111,7 @@ impl Wallet {
         }
         eprintln!();
         eprintln!("Compatible programs and devices should show if initialized with above key,");
-        eprintln!("this first receiver address (BIP44 keypath: m/49'/0'/0/0): {}", first_address);
+        eprintln!("this first receiver address (BIP44 keypath: m/49'/0'/0/0): {}", receiver);
         eprintln!();
         eprint!("Did you write above words down, then answer with yes:");
         let mut answer = String::new();

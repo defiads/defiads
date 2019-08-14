@@ -48,6 +48,7 @@ use rand::{thread_rng, RngCore};
 use log_panics;
 use biadne::find_peers::BIADNET_PORT;
 use bitcoin::util::bip32::ExtendedPubKey;
+use bitcoin_wallet::account::{MasterAccount};
 
 const HTTP_RPC: &str = "127.0.0.1";
 const BIADNET_LISTEN: &str = "0.0.0.0"; // this also implies ipv6 [::]
@@ -211,30 +212,54 @@ pub fn main () {
     let db_name = matches.value_of("db").unwrap();
     let db_path = std::path::Path::new(db_name);
 
+    let mut db = DB::new(db_path).expect("can not open db");
+    {
+        let mut tx = db.transaction();
+        tx.create_tables();
+        tx.commit();
+    }
+
     let storage_limit = matches.value_of("storage-limit").unwrap().parse::<u64>().expect("expecting number of GB") * 1000*1000;
 
     let config_path = std::path::Path::new(matches.value_of("config").unwrap());
-    let config = if let Ok(config_string) = fs::read_to_string( config_path) {
-        toml::from_str::<Config>(config_string.as_str()).expect("can not parse config file")
+
+    let bitcoin_wallet;
+    let config;
+    if let Ok(config_string) = fs::read_to_string( config_path) {
+        config = toml::from_str::<Config>(config_string.as_str()).expect("can not parse config file");
+        let mut master_account = MasterAccount::from_encrypted(
+            hex::decode(config.encryptedwalletkey).expect("encryptedwalletkey is not hex").as_slice(),
+            ExtendedPubKey::from_str(config.keyroot.as_str()).expect("keyroot is malformed"),
+            config.birth
+        );
+        {
+            let mut tx = db.transaction();
+            for i in 0..3 {
+                let account = tx.read_account(i, bitcoin_network).expect("can not read account 0");
+                master_account.add_account(account);
+            }
+            bitcoin_wallet = tx.read_wallet(master_account, config.lookahead).expect("can not read wallet");
+        }
     } else {
-        let wallet = Wallet::new(bitcoin_network);
+
+        bitcoin_wallet = Wallet::new(bitcoin_network);
         let mut apikey = [0u8;12];
         thread_rng().fill_bytes(&mut apikey);
-        let config = Config {
+        config = Config {
             apikey: base64::encode(&apikey),
-            encryptedwalletkey: hex::encode(wallet.encrypted().as_slice()),
-            keyroot: wallet.master_public().to_string(),
-            birth: wallet.birth(),
-            lookahead: wallet.look_ahead()
+            encryptedwalletkey: hex::encode(bitcoin_wallet.encrypted().as_slice()),
+            keyroot: bitcoin_wallet.master_public().to_string(),
+            birth: bitcoin_wallet.birth(),
+            lookahead: bitcoin_wallet.look_ahead()
         };
+        {
+            let mut tx = db.transaction();
+            tx.store_wallet(&bitcoin_wallet).expect("can not store new wallet");
+            tx.store_master(&bitcoin_wallet.master).expect("can not store new master account");
+            tx.commit();
+        }
         fs::write(config_path, toml::to_string(&config).unwrap()).expect("can not write config file");
-        config
     };
-
-    let bitcoin_wallet = Wallet::from_encrypted(
-        hex::decode(config.encryptedwalletkey).unwrap().as_slice(),
-        ExtendedPubKey::from_str(config.keyroot.as_str()).expect("can not decode key root"),
-        config.birth, config.lookahead);
 
     eprintln!("Starting biadnet.");
     eprintln!("Observe progress in the log file.");
@@ -244,10 +269,6 @@ pub fn main () {
     chaindb.init(false).expect("can not initialize db");
     let chaindb = Arc::new(RwLock::new(chaindb));
 
-    let mut db = DB::new(db_path).expect("can not open db");
-    let mut tx = db.transaction();
-    tx.create_tables();
-    tx.commit();
     let db = Arc::new(Mutex::new(db));
 
     let content_store =

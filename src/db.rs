@@ -25,7 +25,7 @@ use crate::error::BiadNetError;
 use std::time::SystemTime;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashSet};
 use rand::{thread_rng, Rng};
 use crate::content::Content;
 use serde_cbor;
@@ -38,13 +38,13 @@ use crate::text::Text;
 use bitcoin::{PublicKey, OutPoint, TxOut, Script};
 use std::time::UNIX_EPOCH;
 use crate::discovery::NetAddress;
-use bitcoin_wallet::account::{AccountAddressType, InstantiatedKey, Account, MasterAccount, KeyDerivation};
+use bitcoin_wallet::account::{AccountAddressType, Account, MasterAccount, KeyDerivation};
 use bitcoin::util::bip32::ExtendedPubKey;
 use bitcoin::network::constants::Network;
 use crate::wallet::Wallet;
 use bitcoin_wallet::coins::{Coin, Coins};
 use bitcoin_wallet::proved::ProvedTransaction;
-use secp256k1::ffi::secp256k1_ecdh_hash_function_default;
+
 
 pub type SharedDB = Arc<Mutex<DB>>;
 
@@ -197,6 +197,17 @@ impl<'db> TX<'db> {
             }
         }
         Ok(Wallet::from_storage(coins, master, look_ahead))
+    }
+
+    pub fn store_master(&mut self, master: &MasterAccount) -> Result<usize, BiadNetError> {
+        self.tx.execute (r#"
+            delete from account;
+        "#, NO_PARAMS)?;
+        let mut inserted = 0;
+        for (_, account) in master.accounts().iter() {
+            inserted += self.store_account(account)?;
+        }
+        Ok(inserted)
     }
 
     pub fn store_account(&mut self, account: &Account) -> Result<usize, BiadNetError> {
