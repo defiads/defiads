@@ -42,7 +42,6 @@ use murmel::{
     dns::dns_seed,
     downstream::Downstream,
     error::MurmelError,
-    headerdownload::HeaderDownload,
     ping::Ping,
     p2p::{
         PeerMessageSender, PeerSource, P2PControlSender, PeerMessage, PeerMessageReceiver,
@@ -60,6 +59,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use futures::task::Waker;
 use crate::trunk::Trunk;
+use crate::blockdownload::BlockDownload;
 
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
@@ -112,7 +112,7 @@ impl P2PBitcoin {
         if self.discovery {
             dispatcher.add_listener(AddressPoolMaintainer::new(p2p_control.clone(), self.db.clone(), murmel::p2p::SERVICE_BLOCKS));
         }
-        dispatcher.add_listener(HeaderDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout.clone(), downstream));
+        dispatcher.add_listener(BlockDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout.clone(), downstream));
         dispatcher.add_listener(Ping::new(p2p_control.clone(), timeout.clone()));
 
         let p2p2 = p2p.clone();
