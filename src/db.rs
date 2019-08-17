@@ -19,7 +19,7 @@ use bitcoin_hashes::{
     hex::{FromHex, ToHex}
 };
 use log::Level;
-use rusqlite::{Connection, Transaction, ToSql};
+use rusqlite::{Connection, Transaction, ToSql, OptionalExtension};
 use std::net::SocketAddr;
 use crate::error::BiadNetError;
 use std::time::SystemTime;
@@ -140,11 +140,11 @@ impl<'db> TX<'db> {
         "#).expect("failed to create db tables");
     }
 
-    pub fn read_processed(&mut self) -> Result<sha256d::Hash, BiadNetError> {
+    pub fn read_processed(&mut self) -> Result<Option<sha256d::Hash>, BiadNetError> {
         Ok(self.tx.query_row(r#"
             select block from processed where rowid = 1
         "#,NO_PARAMS, |r| Ok(sha256d::Hash::from_hex(r.get_unwrap::<usize, String>(0).as_str())
-            .expect("stored block not hex")))?)
+            .expect("stored block not hex"))).optional()?)
     }
 
     pub fn store_processed(&mut self, block_id: &sha256d::Hash) -> Result<(), BiadNetError> {
@@ -688,9 +688,10 @@ mod test {
             tx.delete_expired(1).unwrap();
             tx.truncate_content(1024).unwrap();
 
+            assert!(tx.read_processed().unwrap().is_none());
             tx.store_processed(&sha256d::Hash::default()).unwrap();
             tx.store_processed(&block.bitcoin_hash()).unwrap();
-            assert_eq!(tx.read_processed().unwrap(), block.bitcoin_hash());
+            assert_eq!(tx.read_processed().unwrap().unwrap(), block.bitcoin_hash());
             tx.commit();
         }
     }

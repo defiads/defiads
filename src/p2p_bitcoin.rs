@@ -71,12 +71,13 @@ pub struct P2PBitcoin {
     network: Network,
     db: SharedDB,
     content_store: SharedContentStore,
-    discovery: bool
+    discovery: bool,
+    birth: u64
 }
 
 impl P2PBitcoin {
-    pub fn new (network: Network, connections: usize, peers: Vec<SocketAddr>, discovery: bool, chaindb: SharedChainDB, db: SharedDB, content_store: SharedContentStore) -> P2PBitcoin {
-        P2PBitcoin {connections, peers, chaindb, network, db, content_store, discovery}
+    pub fn new (network: Network, connections: usize, peers: Vec<SocketAddr>, discovery: bool, chaindb: SharedChainDB, db: SharedDB, content_store: SharedContentStore, birth: u64) -> P2PBitcoin {
+        P2PBitcoin {connections, peers, chaindb, network, db, content_store, discovery, birth}
     }
     pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
@@ -105,14 +106,43 @@ impl P2PBitcoin {
             PeerMessageSender::new(sender),
             10);
 
-        let timeout = Arc::new(Mutex::new(Timeout::new(p2p_control.clone())));
-
         let downstream = Arc::new(Mutex::new(BitcoinDriver{store: self.content_store.clone()}));
+
+        let processed_block;
+        {
+            let mut db = self.db.lock().unwrap();
+            let mut tx = db.transaction();
+            processed_block = tx.read_processed().expect("can not read processed block");
+        }
+        if let Some(mut processed_block) = processed_block {
+            let mut disconnected = Vec::new();
+            {
+                // re-org might have happened while this node was down
+                let chaindb = self.chaindb.read().unwrap();
+                if let Some(mut header) = chaindb.get_header(&processed_block) {
+                    while chaindb.pos_on_trunk(&processed_block).is_none() {
+                        disconnected.push(header.stored.header.clone());
+                        processed_block = header.stored.header.prev_blockhash;
+                        header = chaindb.get_header(&processed_block).expect("inconsistent header cache");
+                    }
+                } else {
+                    panic!("can not find header for last processed block");
+                }
+            }
+            if !disconnected.is_empty() {
+                let mut downstream = downstream.lock().unwrap();
+                for h in &disconnected {
+                    downstream.block_disconnected(h);
+                }
+            }
+        }
+
+        let timeout = Arc::new(Mutex::new(Timeout::new(p2p_control.clone())));
 
         if self.discovery {
             dispatcher.add_listener(AddressPoolMaintainer::new(p2p_control.clone(), self.db.clone(), murmel::p2p::SERVICE_BLOCKS));
         }
-        dispatcher.add_listener(BlockDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout.clone(), downstream));
+        dispatcher.add_listener(BlockDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout.clone(), downstream, processed_block, self.birth));
         dispatcher.add_listener(Ping::new(p2p_control.clone(), timeout.clone()));
 
         let p2p2 = p2p.clone();
