@@ -132,8 +132,26 @@ impl<'db> TX<'db> {
                 tweak text,
                 proof blob,
                 primary key(txid, vout)
-            ) without rowid
+            ) without rowid;
+
+            create table if not exists processed (
+                block text
+            );
         "#).expect("failed to create db tables");
+    }
+
+    pub fn read_processed(&mut self) -> Result<sha256d::Hash, BiadNetError> {
+        Ok(self.tx.query_row(r#"
+            select block from processed where rowid = 1
+        "#,NO_PARAMS, |r| Ok(sha256d::Hash::from_hex(r.get_unwrap::<usize, String>(0).as_str())
+            .expect("stored block not hex")))?)
+    }
+
+    pub fn store_processed(&mut self, block_id: &sha256d::Hash) -> Result<(), BiadNetError> {
+        self.tx.execute(r#"
+            insert or replace into processed (rowid, block) values (1, ?1)
+        "#, &[&block_id.to_string() as &ToSql])?;
+        Ok(())
     }
 
     pub fn store_wallet(&mut self, wallet: &Wallet) -> Result<(), BiadNetError> {
@@ -463,6 +481,7 @@ impl<'db> TX<'db> {
 
     // get an address not banned during the last day
     // the probability to be selected is exponentially higher for those with higher last_seen time
+    // TODO mark tried connections, build slots instead of storing all. Replace only if not tried for long or banned
     pub fn get_an_address(&self, network: &str, other_than: &HashSet<SocketAddr>) -> Result<Option<SocketAddr>, BiadNetError> {
         const BAN_TIME: u64 = 60*60*24; // a day
 
@@ -668,6 +687,10 @@ mod test {
             tx.delete_confirmed(&block.bitcoin_hash()).unwrap();
             tx.delete_expired(1).unwrap();
             tx.truncate_content(1024).unwrap();
+
+            tx.store_processed(&sha256d::Hash::default()).unwrap();
+            tx.store_processed(&block.bitcoin_hash()).unwrap();
+            assert_eq!(tx.read_processed().unwrap(), block.bitcoin_hash());
             tx.commit();
         }
     }
