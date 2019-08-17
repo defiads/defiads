@@ -159,6 +159,7 @@ impl BlockDownload {
             let mut headers_queue = VecDeque::new();
             headers_queue.extend(headers.iter());
             while !headers_queue.is_empty() {
+                let mut connected_headers = Vec::new();
                 let mut disconnected_headers = Vec::new();
                 {
                     let mut chaindb = self.chaindb.write().unwrap();
@@ -166,7 +167,7 @@ impl BlockDownload {
                         // add to blockchain - this also checks proof of work
                         match chaindb.add_header(&header.header) {
                             Ok(Some((stored, unwinds, forwards))) => {
-                                self.downstream.lock().unwrap().header_connected(&stored.header, stored.height);
+                                connected_headers.push((stored.height, stored.header));
                                 // POW is ok, stored top chaindb
                                 some_new = true;
 
@@ -196,8 +197,13 @@ impl BlockDownload {
                     chaindb.batch()?;
                 }
 
+                // call downstream outside of chaindb lock
+                let mut downstream = self.downstream.lock().unwrap();
                 for header in &disconnected_headers {
-                    self.downstream.lock().unwrap().block_disconnected(header);
+                    downstream.block_disconnected(header);
+                }
+                for (height, header) in &connected_headers {
+                    downstream.header_connected(header, *height);
                 }
             }
 
