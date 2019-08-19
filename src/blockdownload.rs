@@ -39,7 +39,8 @@ pub struct BlockDownload {
     downstream: SharedDownstream,
     blocks_wanted: VecDeque<(sha256d::Hash, u32)>,
     blocks_asked: VecDeque<(sha256d::Hash, u32)>,
-    block_download_peer: Option<PeerId>
+    block_download_peer: Option<PeerId>,
+    birth: u64
 }
 
 impl BlockDownload {
@@ -68,7 +69,7 @@ impl BlockDownload {
         }
 
         let mut headerdownload = BlockDownload { chaindb, p2p, timeout, downstream: downstream,
-            blocks_wanted, blocks_asked: VecDeque::new(), block_download_peer: None };
+            blocks_wanted, blocks_asked: VecDeque::new(), block_download_peer: None, birth };
 
         thread::Builder::new().name("header download".to_string()).spawn(move || { headerdownload.run(receiver) }).unwrap();
 
@@ -265,12 +266,16 @@ impl BlockDownload {
                 // call downstream outside of chaindb lock
                 let mut downstream = self.downstream.lock().unwrap();
                 for header in &disconnected_headers {
-                    self.blocks_wanted.pop_back();
-                    downstream.block_disconnected(header);
+                    if (header.time as u64) > self.birth {
+                        self.blocks_wanted.pop_back();
+                        downstream.block_disconnected(header);
+                    }
                 }
                 for (height, header) in &connected_headers {
-                    self.blocks_wanted.push_back((header.bitcoin_hash(), *height));
-                    downstream.header_connected(header, *height);
+                    if (header.time as u64) > self.birth {
+                        self.blocks_wanted.push_back((header.bitcoin_hash(), *height));
+                        downstream.header_connected(header, *height);
+                    }
                 }
             }
 
