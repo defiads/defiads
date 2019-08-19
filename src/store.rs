@@ -99,8 +99,13 @@ impl ContentStore {
     }
 
     pub fn block_connected(&mut self, block: &Block, height: u32) -> Result<(), BiadNetError> {
-        // TODO
-        self.wallet.process(block);
+        debug!("processing block {} {}", height, block.header.bitcoin_hash());
+        let mut db = self.db.lock().unwrap();
+        let mut tx = db.transaction();
+        if self.wallet.process(block) {
+            tx.store_coins(&self.wallet.coins())?;
+        }
+        tx.store_processed(&block.header.bitcoin_hash())?;
         Ok(())
     }
 

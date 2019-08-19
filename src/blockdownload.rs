@@ -13,21 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use bitcoin::{
-    BitcoinHash,
-    blockdata::{
-        block::LoneBlockHeader,
-    },
-    network::{
-        message::NetworkMessage,
-        message_blockdata::{GetHeadersMessage, Inventory, InvType},
-    }
-};
+use bitcoin::{BitcoinHash, blockdata::{
+    block::LoneBlockHeader,
+}, network::{
+    message::NetworkMessage,
+    message_blockdata::{GetHeadersMessage, Inventory, InvType},
+}, Block};
 use bitcoin_hashes::sha256d;
 use murmel::chaindb::SharedChainDB;
 use murmel::error::MurmelError;
 use murmel::p2p::{P2PControl, P2PControlSender, PeerId, PeerMessage, PeerMessageReceiver, PeerMessageSender, SERVICE_BLOCKS};
-use murmel::downstream::Downstream;
 use murmel::timeout::{ExpectedReply, SharedTimeout};
 use murmel::downstream::SharedDownstream;
 use std::{
@@ -42,7 +37,7 @@ pub struct BlockDownload {
     chaindb: SharedChainDB,
     timeout: SharedTimeout<NetworkMessage, ExpectedReply>,
     downstream: SharedDownstream,
-    blocks_wanted: VecDeque<sha256d::Hash>
+    blocks_wanted: VecDeque<(sha256d::Hash, u32)>
 }
 
 impl BlockDownload {
@@ -57,7 +52,7 @@ impl BlockDownload {
                     let stop_at = processed_block.unwrap_or_default();
                     let mut block_hash = h.bitcoin_hash();
                     while block_hash != stop_at {
-                        blocks_wanted.push_front(block_hash);
+                        blocks_wanted.push_front((block_hash, h.stored.height));
                         block_hash = h.stored.header.prev_blockhash.clone();
                         if block_hash != sha256d::Hash::default() {
                             h = chaindb.get_header(&block_hash).expect("inconsistent header cache");
@@ -92,12 +87,39 @@ impl BlockDownload {
                         match msg {
                             NetworkMessage::Headers(ref headers) => if self.is_serving_blocks(pid) { self.headers(headers, pid); },
                             NetworkMessage::Inv(ref inv) => if self.is_serving_blocks(pid) { self.inv(inv, pid); },
+                            NetworkMessage::Block(ref block) => self.block(block, pid),
                             _ => {}
+                        }
+                        if let Some((wanted,_)) = self.blocks_wanted.front() {
+                            let mut timeout = self.timeout.lock().unwrap();
+                            if !timeout.is_busy_with(pid, ExpectedReply::Block) {
+                                self.p2p.send_network(pid, NetworkMessage::GetData(
+                                    vec!(
+                                        Inventory{
+                                            inv_type: InvType::Block,
+                                            hash: wanted.clone()
+                                        }
+                                    )));
+                                timeout.expect(pid,1, ExpectedReply::Block);
+                            }
                         }
                     }
                 }
             }
-            self.timeout.lock().unwrap().check(vec!(ExpectedReply::Headers));
+            self.timeout.lock().unwrap().check(vec!(ExpectedReply::Headers, ExpectedReply::Block));
+        }
+    }
+
+    fn block (&mut self, block: &Block, pid: PeerId) {
+        if let Some((expected, height)) = self.blocks_wanted.front() {
+            let height = *height;
+            if block.header.bitcoin_hash() == *expected {
+                self.blocks_wanted.pop_front();
+                let mut downstream = self.downstream.lock().unwrap();
+                downstream.block_connected(block, height);
+            }
+            // slower peer will be dropped
+            self.timeout.lock().unwrap().received(pid, 1, ExpectedReply::Block);
         }
     }
 
@@ -215,7 +237,7 @@ impl BlockDownload {
                     downstream.block_disconnected(header);
                 }
                 for (height, header) in &connected_headers {
-                    self.blocks_wanted.push_back(header.bitcoin_hash());
+                    self.blocks_wanted.push_back((header.bitcoin_hash(), *height));
                     downstream.header_connected(header, *height);
                 }
             }

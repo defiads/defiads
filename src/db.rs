@@ -41,7 +41,6 @@ use crate::discovery::NetAddress;
 use bitcoin_wallet::account::{AccountAddressType, Account, MasterAccount, KeyDerivation};
 use bitcoin::util::bip32::ExtendedPubKey;
 use bitcoin::network::constants::Network;
-use crate::wallet::Wallet;
 use bitcoin_wallet::coins::{Coin, Coins};
 use bitcoin_wallet::proved::ProvedTransaction;
 
@@ -154,7 +153,7 @@ impl<'db> TX<'db> {
         Ok(())
     }
 
-    pub fn store_wallet(&mut self, wallet: &Wallet) -> Result<(), BiadNetError> {
+    pub fn store_coins(&mut self, coins: &Coins) -> Result<(), BiadNetError> {
         self.tx.execute (r#"
             delete from coins;
         "#, NO_PARAMS)?;
@@ -162,8 +161,8 @@ impl<'db> TX<'db> {
             insert into coins (txid, vout, value, script, account, sub, kix, tweak, proof)
             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
         "#)?;
-        let proofs = wallet.coins().proofs();
-        for (outpoint, coin) in wallet.coins().owned() {
+        let proofs = coins.proofs();
+        for (outpoint, coin) in coins.owned() {
             let tweak = if let Some(ref tweak) = coin.derivation.tweak {
                     hex::encode(tweak)
                 }
@@ -181,7 +180,7 @@ impl<'db> TX<'db> {
         Ok(())
     }
 
-    pub fn read_wallet(&mut self, master: MasterAccount, look_ahead: u32) -> Result<Wallet, BiadNetError> {
+    pub fn read_coins(&mut self) -> Result<Coins, BiadNetError> {
         let mut query = self.tx.prepare(r#"
             select txid, vout, value, script, account, sub, kix, tweak, proof from coins
         "#)?;
@@ -215,7 +214,7 @@ impl<'db> TX<'db> {
                 coins.add_from_storage(point, coin, proof);
             }
         }
-        Ok(Wallet::from_storage(coins, master, look_ahead))
+        Ok(coins)
     }
 
     pub fn store_master(&mut self, master: &MasterAccount) -> Result<usize, BiadNetError> {
@@ -665,11 +664,9 @@ mod test {
                     }
                 },
                 ProvedTransaction::new(&genesis, 0));
-            let wallet = Wallet::from_storage(coins, master, 10);
-            tx.store_wallet(&wallet).unwrap();
-            let master = MasterAccount::new(MasterKeyEntropy::Recommended, Network::Bitcoin, "", None).unwrap();
-            let other = tx.read_wallet(master, 10).unwrap();
-            assert!(*wallet.coins() == *other.coins());
+            tx.store_coins(&coins).unwrap();
+            let other = tx.read_coins().unwrap();
+            assert!(coins == other);
             tx.commit();
         }
         {

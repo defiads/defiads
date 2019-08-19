@@ -55,7 +55,7 @@ impl Wallet {
         self.coins.unwind_tip(block_hash)
     }
 
-    pub fn process(&mut self, block: &Block) {
+    pub fn process(&mut self, block: &Block) -> bool {
         self.coins.process(&mut self.master, block)
     }
 

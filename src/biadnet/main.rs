@@ -240,7 +240,8 @@ pub fn main () {
             master_account.add_account(account);
             let account = tx.read_account(1, 0, bitcoin_network).expect("can not read account 1/0");
             master_account.add_account(account);
-            bitcoin_wallet = tx.read_wallet(master_account, config.lookahead).expect("can not read wallet");
+            let coins = tx.read_coins().expect ("can not read coins");
+            bitcoin_wallet = Wallet::from_storage(coins, master_account, config.lookahead);
         }
     } else {
 
@@ -256,7 +257,7 @@ pub fn main () {
         };
         {
             let mut tx = db.transaction();
-            tx.store_wallet(&bitcoin_wallet).expect("can not store new wallet");
+            tx.store_coins(&bitcoin_wallet.coins()).expect("can not store new wallet's coins");
             tx.store_master(&bitcoin_wallet.master).expect("can not store new master account");
             tx.commit();
         }
