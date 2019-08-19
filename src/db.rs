@@ -26,7 +26,7 @@ use std::time::SystemTime;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::collections::{HashSet};
-use rand::{thread_rng, Rng};
+use rand::{thread_rng, Rng, RngCore};
 use crate::content::Content;
 use serde_cbor;
 use rusqlite::NO_PARAMS;
@@ -87,6 +87,11 @@ impl<'db> TX<'db> {
 
     pub fn create_tables (&mut self) {
         self.tx.execute_batch(r#"
+            create table if not exists seed (
+                k0 number,
+                k1 number
+            );
+
             create table if not exists address (
                 network text,
                 ip text,
@@ -137,6 +142,24 @@ impl<'db> TX<'db> {
                 block text
             );
         "#).expect("failed to create db tables");
+    }
+
+    pub fn read_seed(&mut self) -> Result<(u64, u64), BiadNetError> {
+        if let Some(seed) = self.tx.query_row(r#"
+            select k0, k1 from seed where rowid = 1
+        "#,NO_PARAMS, |r| Ok(
+            (r.get_unwrap::<usize, i64>(0) as u64,
+            r.get_unwrap::<usize, i64>(1) as u64))).optional()? {
+            return Ok(seed);
+        }
+        else {
+            let k0 = thread_rng().next_u64();
+            let k1 = thread_rng().next_u64();
+            self.tx.execute(r#"
+                insert or replace into seed (rowid, k0, k1) values (1, ?1, ?2)
+            "#, &[&(k0 as i64) as &ToSql, &(k1 as i64)])?;
+            return Ok((k0, k1));
+        }
     }
 
     pub fn read_processed(&mut self) -> Result<Option<sha256d::Hash>, BiadNetError> {
@@ -689,6 +712,7 @@ mod test {
             tx.store_processed(&sha256d::Hash::default()).unwrap();
             tx.store_processed(&block.bitcoin_hash()).unwrap();
             assert_eq!(tx.read_processed().unwrap().unwrap(), block.bitcoin_hash());
+            assert_eq!(tx.read_seed().unwrap(), tx.read_seed().unwrap());
             tx.commit();
         }
     }
