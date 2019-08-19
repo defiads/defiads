@@ -84,12 +84,17 @@ impl BlockDownload {
                         if self.is_serving_blocks(pid) {
                             trace!("serving blocks peer={}", pid);
                             self.get_headers(pid);
+                            if self.block_download_peer.is_none() {
+                                debug!("new block download peer={}", pid);
+                                self.block_download_peer = Some(pid);
+                            }
                         }
                     }
                     PeerMessage::Disconnected(pid,_) => {
                         if self.block_download_peer.is_some() {
                             if pid == self.block_download_peer.unwrap() {
                                 self.block_download_peer = None;
+                                debug!("lost block download peer={}", pid);
                                 while let Some(asked) = self.blocks_asked.pop_back() {
                                     self.blocks_wanted.push_front(asked);
                                 }
@@ -103,7 +108,10 @@ impl BlockDownload {
                             NetworkMessage::Block(ref block) => self.block(block, pid),
                             _ => {}
                         }
-                        if self.is_serving_blocks(pid) {
+                        if self.block_download_peer.is_none() {
+                            self.block_download_peer = Some(pid);
+                        }
+                        if pid == download_peer {
                             self.ask_blocks(pid)
                         }
                     }
@@ -114,18 +122,17 @@ impl BlockDownload {
     }
 
     fn ask_blocks (&mut self, pid: PeerId) {
-        let download_peer = self.block_download_peer.unwrap_or(pid);
-        if pid == download_peer {
-            let mut timeout = self.timeout.lock().unwrap();
-            if !timeout.is_busy_with(pid, ExpectedReply::Block) {
-                let mut n_entries = 0;
-                while let Some((hash, height)) = self.blocks_wanted.pop_front() {
-                    self.blocks_asked.push_back((hash, height));
-                    n_entries += 1;
-                    if n_entries == 1000 {
-                        break;
-                    }
+        let mut timeout = self.timeout.lock().unwrap();
+        if !timeout.is_busy_with(pid, ExpectedReply::Block) {
+            let mut n_entries = 0;
+            while let Some((hash, height)) = self.blocks_wanted.pop_front() {
+                self.blocks_asked.push_back((hash, height));
+                n_entries += 1;
+                if n_entries == 1000 {
+                    break;
                 }
+            }
+            if self.blocks_asked.len() > 0 {
                 self.p2p.send_network(pid, NetworkMessage::GetData(
                     self.blocks_asked.iter().map(|(hash, _)|
                         Inventory {
@@ -133,9 +140,12 @@ impl BlockDownload {
                             hash: hash.clone()
                         }
                     ).collect()));
+                debug!("asked {} blocks from peer={}", self.blocks_asked.len(), pid);
                 timeout.expect(pid, self.blocks_asked.len(), ExpectedReply::Block);
-                self.block_download_peer = Some(pid);
             }
+        }
+        else {
+            debug!("still waiting for blocks from peer={}", pid);
         }
     }
 
@@ -143,10 +153,11 @@ impl BlockDownload {
         if let Some(download_peer) = self.block_download_peer {
             if download_peer == pid {
                 if let Some((expected, height)) = self.blocks_asked.front() {
-                    // will drop for out of sequence answers
-                    self.timeout.lock().unwrap().received(pid, 1, ExpectedReply::Block);
                     let height = *height;
                     if block.header.bitcoin_hash() == *expected {
+                        // will drop for out of sequence answers
+                        self.timeout.lock().unwrap().received(pid, 1, ExpectedReply::Block);
+
                         self.blocks_asked.pop_front();
                         let mut downstream = self.downstream.lock().unwrap();
                         downstream.block_connected(block, height);
