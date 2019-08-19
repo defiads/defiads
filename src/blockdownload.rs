@@ -37,7 +37,9 @@ pub struct BlockDownload {
     chaindb: SharedChainDB,
     timeout: SharedTimeout<NetworkMessage, ExpectedReply>,
     downstream: SharedDownstream,
-    blocks_wanted: VecDeque<(sha256d::Hash, u32)>
+    blocks_wanted: VecDeque<(sha256d::Hash, u32)>,
+    blocks_asked: VecDeque<(sha256d::Hash, u32)>,
+    block_download_peer: Option<PeerId>
 }
 
 impl BlockDownload {
@@ -65,7 +67,8 @@ impl BlockDownload {
             }
         }
 
-        let mut headerdownload = BlockDownload { chaindb, p2p, timeout, downstream: downstream, blocks_wanted };
+        let mut headerdownload = BlockDownload { chaindb, p2p, timeout, downstream: downstream,
+            blocks_wanted, blocks_asked: VecDeque::new(), block_download_peer: None };
 
         thread::Builder::new().name("header download".to_string()).spawn(move || { headerdownload.run(receiver) }).unwrap();
 
@@ -79,10 +82,19 @@ impl BlockDownload {
                     PeerMessage::Connected(pid,_) => {
                         if self.is_serving_blocks(pid) {
                             trace!("serving blocks peer={}", pid);
-                            self.get_headers(pid)
+                            self.get_headers(pid);
                         }
                     }
-                    PeerMessage::Disconnected(_,_) => {}
+                    PeerMessage::Disconnected(pid,_) => {
+                        if self.block_download_peer.is_some() {
+                            if pid == self.block_download_peer.unwrap() {
+                                self.block_download_peer = None;
+                                while let Some(asked) = self.blocks_asked.pop_back() {
+                                    self.blocks_wanted.push_front(asked);
+                                }
+                            }
+                        }
+                    }
                     PeerMessage::Message(pid, msg) => {
                         match msg {
                             NetworkMessage::Headers(ref headers) => if self.is_serving_blocks(pid) { self.headers(headers, pid); },
@@ -90,18 +102,8 @@ impl BlockDownload {
                             NetworkMessage::Block(ref block) => self.block(block, pid),
                             _ => {}
                         }
-                        if let Some((wanted,_)) = self.blocks_wanted.front() {
-                            let mut timeout = self.timeout.lock().unwrap();
-                            if !timeout.is_busy_with(pid, ExpectedReply::Block) {
-                                self.p2p.send_network(pid, NetworkMessage::GetData(
-                                    vec!(
-                                        Inventory{
-                                            inv_type: InvType::Block,
-                                            hash: wanted.clone()
-                                        }
-                                    )));
-                                timeout.expect(pid,1, ExpectedReply::Block);
-                            }
+                        if self.is_serving_blocks(pid) {
+                            self.ask_blocks(pid)
                         }
                     }
                 }
@@ -110,16 +112,46 @@ impl BlockDownload {
         }
     }
 
-    fn block (&mut self, block: &Block, pid: PeerId) {
-        if let Some((expected, height)) = self.blocks_wanted.front() {
-            let height = *height;
-            if block.header.bitcoin_hash() == *expected {
-                self.blocks_wanted.pop_front();
-                let mut downstream = self.downstream.lock().unwrap();
-                downstream.block_connected(block, height);
+    fn ask_blocks (&mut self, pid: PeerId) {
+        let download_peer = self.block_download_peer.unwrap_or(pid);
+        if pid == download_peer {
+            let mut timeout = self.timeout.lock().unwrap();
+            if !timeout.is_busy_with(pid, ExpectedReply::Block) {
+                let mut n_entries = 0;
+                while let Some((hash, height)) = self.blocks_wanted.pop_front() {
+                    self.blocks_asked.push_back((hash, height));
+                    n_entries += 1;
+                    if n_entries == 1000 {
+                        break;
+                    }
+                }
+                self.p2p.send_network(pid, NetworkMessage::GetData(
+                    self.blocks_asked.iter().map(|(hash, _)|
+                        Inventory {
+                            inv_type: InvType::Block,
+                            hash: hash.clone()
+                        }
+                    ).collect()));
+                timeout.expect(pid, self.blocks_asked.len(), ExpectedReply::Block);
+                self.block_download_peer = Some(pid);
             }
-            // slower peer will be dropped
-            self.timeout.lock().unwrap().received(pid, 1, ExpectedReply::Block);
+        }
+    }
+
+    fn block (&mut self, block: &Block, pid: PeerId) {
+        if let Some(download_peer) = self.block_download_peer {
+            if download_peer == pid {
+                if let Some((expected, height)) = self.blocks_asked.front() {
+                    // will drop for out of sequence answers
+                    self.timeout.lock().unwrap().received(pid, 1, ExpectedReply::Block);
+                    let height = *height;
+                    if block.header.bitcoin_hash() == *expected {
+                        self.blocks_asked.pop_front();
+                        let mut downstream = self.downstream.lock().unwrap();
+                        downstream.block_connected(block, height);
+                    }
+                }
+            }
         }
     }
 
