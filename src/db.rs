@@ -486,7 +486,7 @@ impl<'db> TX<'db> {
 
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
         let mut statement = self.tx.prepare(r#"
-            select ip from address where network = ?1 and banned < ?2 order by last_seen desc
+            select ip from address where network = ?2 and banned < ?1 order by last_seen desc
         "#)?;
         let eligible = statement.query_map::<SocketAddr, _, _>(
             &[&((now - BAN_TIME) as i64) as &ToSql, &network.to_string()],
