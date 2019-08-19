@@ -16,7 +16,7 @@
 
 //! store
 
-use bitcoin::{BlockHeader, BitcoinHash, Block};
+use bitcoin::{BlockHeader, BitcoinHash, Block, Address};
 use bitcoin_hashes::{sha256, sha256d};
 use secp256k1::{Secp256k1, All};
 use std::sync::{RwLock, Arc};
@@ -77,6 +77,11 @@ impl ContentStore {
         })
     }
 
+    pub fn deposit_address(&mut self) -> Address {
+        self.wallet.master.get_mut((0,0)).expect("can not find 0/0 account")
+            .next_key().expect("can not generate receiver address in 0/0").address.clone()
+    }
+
     pub fn get_nkeys (&self) -> u32 {
         self.n_keys
     }
@@ -104,6 +109,7 @@ impl ContentStore {
         let mut tx = db.transaction();
         if self.wallet.process(block) {
             tx.store_coins(&self.wallet.coins())?;
+            info!("New wallet balance {} satoshis", &self.wallet.coins().owned().values().map(|c| c.output.value).sum::<u64>());
         }
         tx.store_processed(&block.header.bitcoin_hash())?;
         tx.commit();
