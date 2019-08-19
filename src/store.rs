@@ -106,6 +106,7 @@ impl ContentStore {
             tx.store_coins(&self.wallet.coins())?;
         }
         tx.store_processed(&block.header.bitcoin_hash())?;
+        tx.commit();
         Ok(())
     }
 
