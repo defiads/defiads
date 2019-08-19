@@ -333,7 +333,9 @@ impl KeepConnected {
             let mut db = self.db.lock().unwrap();
             let mut tx = db.transaction();
             for a in &self.dns {
-                tx.store_address("biadnet", a, 0, 0).expect("can not store addresses in db");
+                let now = SystemTime::now().duration_since(
+                    SystemTime::UNIX_EPOCH).unwrap().as_secs();
+                tx.store_address("biadnet", a, 0, now, 0).expect("can not store addresses in db");
             }
             tx.commit();
         }
@@ -374,9 +376,9 @@ impl AddressPoolMaintainer {
                         let mut db = self.db.lock().unwrap();
                         let mut tx = db.transaction();
                         debug!("store successful connection to {} peer={}", &address, pid);
-                        tx.store_address("biadnet", &address,
-                                         SystemTime::now().duration_since(
-                                             SystemTime::UNIX_EPOCH).unwrap().as_secs(), 0).unwrap();
+                        let now = SystemTime::now().duration_since(
+                            SystemTime::UNIX_EPOCH).unwrap().as_secs();
+                        tx.store_address("biadnet", &address, now, now, 0).unwrap();
                         tx.commit();
                     }
                 }
@@ -388,7 +390,7 @@ impl AddressPoolMaintainer {
                             let now = SystemTime::now().duration_since(
                                 SystemTime::UNIX_EPOCH).unwrap().as_secs();
                             debug!("store ban of {} peer={}", &address, pid);
-                            tx.store_address("biadnet", &address, 0, now).unwrap();
+                            tx.store_address("biadnet", &address, 0, 0, now).unwrap();
                             tx.commit();
                         }
                     }

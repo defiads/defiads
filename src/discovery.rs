@@ -73,7 +73,7 @@ impl Discovery {
                             let mut db = self.db.lock().unwrap();
                             let mut tx = db.transaction();
                             debug!("store successful connection to {} peer={}", &address, pid);
-                            tx.store_address("biadnet", &address, now, 0).expect("can not store addresses");
+                            tx.store_address("biadnet", &address, now, now, 0).expect("can not store addresses");
                         }
                         self.poll_address(pid);
                         last_polled = SystemTime::now();
@@ -86,7 +86,7 @@ impl Discovery {
                                 let now = SystemTime::now().duration_since(
                                     SystemTime::UNIX_EPOCH).unwrap().as_secs();
                                 debug!("store ban of {} peer={}", &address, pid);
-                                tx.store_address("bitcoin", &address, 0, now).unwrap();
+                                tx.store_address("bitcoin", &address, 0, 0, now).unwrap();
                                 tx.commit();
                             }
                         }
@@ -140,7 +140,7 @@ impl Discovery {
                                             IBLTEntry::Deleted(addr) => {
                                                 if let Ok(addr) = addr.socket_address() {
                                                     debug!("Received and stored new address {} from peer={}", addr, pid);
-                                                    tx.store_address("biadnet", &addr, now, 0).expect("can not store addresses");
+                                                    tx.store_address("biadnet", &addr, 0, now, 0).expect("can not store addresses");
                                                 }
                                             }
                                             _ => {}

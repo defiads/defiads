@@ -248,7 +248,7 @@ impl KeepConnected {
             let mut db = self.db.lock().unwrap();
             let mut tx = db.transaction();
             for a in &self.dns {
-                tx.store_address("bitcoin", a, 0, 0).expect("can not store addresses in db");
+                tx.store_address("bitcoin", a, 0, 0, 0).expect("can not store addresses in db");
             }
             tx.commit();
         }
@@ -290,9 +290,9 @@ impl AddressPoolMaintainer {
                         let mut db = self.db.lock().unwrap();
                         let mut tx = db.transaction();
                         debug!("store successful connection to {} peer={}", &address, pid);
-                        tx.store_address("bitcoin", &address,
-                                         SystemTime::now().duration_since(
-                                             SystemTime::UNIX_EPOCH).unwrap().as_secs(), 0).unwrap();
+                        let now = SystemTime::now().duration_since(
+                            SystemTime::UNIX_EPOCH).unwrap().as_secs();
+                        tx.store_address("bitcoin", &address, now, now, 0).unwrap();
                         tx.commit();
                     }
                 }
@@ -304,7 +304,7 @@ impl AddressPoolMaintainer {
                             let now = SystemTime::now().duration_since(
                                 SystemTime::UNIX_EPOCH).unwrap().as_secs();
                             debug!("store ban of {} peer={}", &address, pid);
-                            tx.store_address("bitcoin", &address, 0, now).unwrap();
+                            tx.store_address("bitcoin", &address, 0, 0, now).unwrap();
                             tx.commit();
                         }
                     }
@@ -319,7 +319,7 @@ impl AddressPoolMaintainer {
                                     a.services & self.needed_services == self.needed_services {
                                     if let Ok(addr) = a.socket_addr() {
                                         debug!("received and stored address {} peer={}", &addr, pid);
-                                        tx.store_address("bitcoin", &addr, *last_seen as u64, 0).unwrap();
+                                        tx.store_address("bitcoin", &addr, 0, *last_seen as u64, 0).unwrap();
                                     }
                                 }
                             }

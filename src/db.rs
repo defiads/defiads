@@ -21,6 +21,8 @@ use bitcoin_hashes::{
 use log::Level;
 use rusqlite::{Connection, Transaction, ToSql, OptionalExtension};
 use std::net::SocketAddr;
+use std::hash::Hasher;
+use crate::byteorder::ByteOrder;
 use crate::error::BiadNetError;
 use std::time::SystemTime;
 use std::str::FromStr;
@@ -43,6 +45,8 @@ use bitcoin::util::bip32::ExtendedPubKey;
 use bitcoin::network::constants::Network;
 use bitcoin_wallet::coins::{Coin, Coins};
 use bitcoin_wallet::proved::ProvedTransaction;
+use siphasher::sip::SipHasher;
+use byteorder::LittleEndian;
 
 
 pub type SharedDB = Arc<Mutex<DB>>;
@@ -53,6 +57,7 @@ const NH:usize = 4;
 const K0:u64 = 1614418600579272000;
 const K1:u64 = 8727507265883984962;
 
+const ADDRESS_SLOTS:u64 = 10000;
 
 pub struct DB {
     connection: Connection
@@ -94,10 +99,12 @@ impl<'db> TX<'db> {
 
             create table if not exists address (
                 network text,
+                slot number,
                 ip text,
+                connected number,
                 last_seen number,
                 banned number,
-                primary key(network, ip)
+                primary key(network, slot)
             ) without rowid;
 
             create table if not exists content (
@@ -484,21 +491,56 @@ impl<'db> TX<'db> {
         Ok(keys)
     }
 
-    pub fn store_address(&mut self, network: &str, address: &SocketAddr, mut last_seen: u64, mut banned: u64) -> Result<usize, BiadNetError>  {
-        if let Ok((ls, b)) = self.tx.query_row(r#"
-                select last_seen, banned from address where network = ?1 and ip = ?2
-            "#, &[&network.to_string() as &dyn ToSql, &address.to_string()],
-                                               |r| Ok((r.get(0).unwrap_or(0i64),
-                                                       r.get(1).unwrap_or(0i64)))) {
-            // do not reduce last_seen or banned fields
-            last_seen = std::cmp::max(ls as u64, last_seen);
-            banned = std::cmp::max(b as u64, banned);
+    pub fn store_address(&mut self, network: &str, address: &SocketAddr, mut connected: u64, mut last_seen: u64, mut banned: u64) -> Result<usize, BiadNetError>  {
+        let (k0, k1) = self.read_seed()?;
+        let mut siphasher = SipHasher::new_with_keys(k0, k1);
+        siphasher.write(network.as_bytes());
+        for a in NetAddress::new(address).address.iter() {
+            let mut buf = [0u8; 2];
+            LittleEndian::write_u16(&mut buf, *a);
+            siphasher.write(&buf);
         }
-        Ok(
-            self.tx.execute(r#"
-                insert or replace into address (network, ip, last_seen, banned) values (?1, ?2, ?3, ?4)
-            "#, &[&network.to_string() as &dyn ToSql, &address.to_string(), &(last_seen as i64), &(banned as i64)])?
-        )
+        let slot = (siphasher.finish() % ADDRESS_SLOTS) as u16;
+        if let Ok((oldip, oldconnect, oldls, oldban)) = self.tx.query_row(r#"
+                select ip, connected, last_seen, banned from address where network = ?1 and slot = ?2
+            "#, &[&network.to_string() as &dyn ToSql, &slot],
+                                               |r| Ok(
+                                                   (SocketAddr::from_str(r.get_unwrap::<usize, String>(0).as_str()).expect("address stored in db should be parsable"),
+                                                    r.get_unwrap::<usize, i64>(1) as u64,
+                                                    r.get_unwrap::<usize, i64>(2) as u64,
+                                                    r.get_unwrap::<usize, i64>(3) as u64))) {
+            // do not reduce last_seen or banned fields
+            if oldip != *address {
+                let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+                const OLD_CONNECTION: u64 = 5*24*60*60;
+                if oldban > 0 || oldconnect < now - OLD_CONNECTION {
+                    return Ok(
+                        self.tx.execute(r#"
+                            insert or replace into address (network, slot, ip, connected, last_seen, banned) values (?1, ?2, ?3, ?4, ?5, ?6)
+                        "#, &[&network.to_string() as &dyn ToSql, &slot, &address.to_string(),
+                                        &(connected as i64), &(last_seen as i64), &(banned as i64)])?
+                    );
+                }
+            }
+            else {
+                connected = std::cmp::max(oldconnect as u64, connected);
+                last_seen = std::cmp::max(oldls as u64, last_seen);
+                banned = std::cmp::max(oldban as u64, banned);
+                return Ok(self.tx.execute(r#"
+                        insert or replace into address (network, slot, ip, connected, last_seen, banned) values (?1, ?2, ?3, ?4, ?5, ?6)
+                    "#, &[&network.to_string() as &dyn ToSql, &slot, &address.to_string(),
+                    &(connected as i64), &(last_seen as i64), &(banned as i64)])?);
+            }
+            Ok(0)
+        }
+        else {
+            Ok(
+                self.tx.execute(r#"
+                insert or replace into address (network, slot, ip, connected, last_seen, banned) values (?1, ?2, ?3, ?4, ?5, ?6)
+            "#, &[&network.to_string() as &dyn ToSql, &slot, &address.to_string(),
+                    &(connected as i64), &(last_seen as i64), &(banned as i64)])?
+            )
+        }
     }
 
     // get an address not banned during the last day
@@ -527,7 +569,8 @@ impl<'db> TX<'db> {
         }
         Ok(Some(
             eligible[
-                std::cmp::min(len-1, thread_rng().sample::<f64,_>(Poisson::new(len as f64 / 4.0).unwrap()) as usize)]))
+                std::cmp::min(len-1, thread_rng().sample::<f64,_>(
+                    Poisson::new(len as f64 / 4.0).unwrap()) as usize)]))
     }
 
     pub fn list_categories(&mut self) -> Result<Vec<String>, BiadNetError> {
@@ -647,16 +690,16 @@ mod test {
             let mut tx = db.transaction();
             tx.create_tables();
             // store address
-            tx.store_address("biadnet", &addr, 0, 0).unwrap();
+            tx.store_address("biadnet", &addr, 0, 0, 0).unwrap();
             // update
-            tx.store_address("biadnet", &addr, 1, 1).unwrap();
+            tx.store_address("biadnet", &addr, 0, 1, 1).unwrap();
             //find
             tx.get_an_address("biadnet", &HashSet::new()).unwrap();
             // should not find if seen
             assert!(tx.get_an_address("biadnet", &seen).unwrap().is_none());
             // ban
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-            tx.store_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap(), 1, now).unwrap();
+            tx.store_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap(), 0, 1, now).unwrap();
             // should not find if banned
             assert!(tx.get_an_address("biadnet", &HashSet::new()).unwrap().is_none());
 
