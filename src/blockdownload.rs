@@ -111,7 +111,7 @@ impl BlockDownload {
                         if self.block_download_peer.is_none() {
                             self.block_download_peer = Some(pid);
                         }
-                        if pid == download_peer {
+                        if pid == self.block_download_peer.unwrap() {
                             self.ask_blocks(pid)
                         }
                     }
