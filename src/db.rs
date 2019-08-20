@@ -126,7 +126,6 @@ impl<'db> TX<'db> {
                 sub number,
                 address_type number,
                 master text,
-                look_ahead number,
                 instantiated blob,
                 primary key(account_number, sub)
             ) without rowid;
@@ -260,18 +259,18 @@ impl<'db> TX<'db> {
     pub fn store_account(&mut self, account: &Account) -> Result<usize, BiadNetError> {
         debug!("store account {}/{}", account.account_number(), account.sub_account_number());
         Ok(self.tx.execute(r#"
-            insert or replace into account (account_number, address_type, sub, master, look_ahead, instantiated)
-            values (?1, ?2, ?3, ?4, ?5, ?6)
+            insert or replace into account (account_number, address_type, sub, master, instantiated)
+            values (?1, ?2, ?3, ?4, ?5)
         "#, &[&account.account_number() as &ToSql,
             &account.address_type().as_u32(), &account.sub_account_number(), &account.master_public().to_string(),
-            &account.look_ahead(), &serde_cbor::ser::to_vec(&account.instantiated())?]
+            &serde_cbor::ser::to_vec(&account.instantiated())?]
         )?)
     }
 
-    pub fn read_account(&mut self, account_number: u32, sub: u32, network: Network) -> Result<Account, BiadNetError> {
+    pub fn read_account(&mut self, account_number: u32, sub: u32, network: Network, look_ahead: u32) -> Result<Account, BiadNetError> {
         debug!("read account {}/{}", account_number, sub);
         Ok(self.tx.query_row(r#"
-            select address_type,  master, instantiated, look_ahead from account where account_number = ?1 and sub = ?2
+            select address_type, master, instantiated from account where account_number = ?1 and sub = ?2
         "#, &[&account_number as &ToSql, &sub], |r| {
             Ok(Account::new_from_storage(
                 AccountAddressType::from_u32(r.get_unwrap::<usize, u32>(0)),
@@ -280,7 +279,7 @@ impl<'db> TX<'db> {
                 ExtendedPubKey::from_str(r.get_unwrap::<usize, String>(1).as_str()).expect("malformed master public stored"),
                 serde_cbor::from_slice(r.get_unwrap::<usize, Vec<u8>>(2).as_slice()).expect("malformed instantiated keys stored"),
                 0,
-                r.get_unwrap::<usize, u32>(3),
+                look_ahead,
                 network
             ))
         })?)
@@ -705,7 +704,7 @@ mod test {
             let mut unlocker = Unlocker::new(master.encrypted().as_slice(), "", None, Network::Bitcoin, Some(master.master_public())).unwrap();
             let account = Account::new(&mut unlocker, AccountAddressType::P2SHWPKH, 1, 2, 10).unwrap();
             tx.store_account(&account).unwrap();
-            tx.read_account(1, 2, Network::Bitcoin).unwrap();
+            tx.read_account(1, 2, Network::Bitcoin, 0).unwrap();
 
             let genesis = genesis_block(Network::Bitcoin);
 

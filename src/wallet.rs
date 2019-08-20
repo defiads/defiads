@@ -21,13 +21,12 @@ use bitcoin::{Block};
 use bitcoin_wallet::proved::ProvedTransaction;
 use bitcoin_wallet::coins::Coins;
 
-const KEY_LOOK_AHEAD: u32 = 10;
+pub const KEY_LOOK_AHEAD: u32 = 10;
 const KEY_PURPOSE: u32 = 0xb1ad;
 
 pub struct Wallet {
     coins: Coins,
-    pub master: MasterAccount,
-    look_ahead: u32
+    pub master: MasterAccount
 }
 
 impl Wallet {
@@ -43,12 +42,12 @@ impl Wallet {
         self.master.birth()
     }
 
-    pub fn look_ahead(&self) -> u32 {
-        self.look_ahead
-    }
-
     pub fn coins(&self) -> &Coins {
         &self.coins
+    }
+
+    pub fn balance(&self) -> u64 {
+        self.coins.balance()
     }
 
     pub fn unwind_tip(&mut self, block_hash: &sha256d::Hash) {
@@ -63,13 +62,18 @@ impl Wallet {
         self.coins.proofs().get(txid)
     }
 
-    pub fn from_storage(coins: Coins, master: MasterAccount, look_ahead: u32) -> Wallet {
-        Wallet { coins, master, look_ahead }
+    pub fn from_storage(coins: Coins, mut master: MasterAccount) -> Wallet {
+        for (_, coin) in coins.owned() {
+            let ref d = coin.derivation;
+            let seen = d.kix;
+            master.get_mut((d.account, d.sub)).unwrap().do_look_ahead(seen).expect("can not look ahead of storage");
+        }
+        Wallet { coins, master }
     }
 
-    pub fn from_encrypted(encrypted: &[u8], public_master_key: ExtendedPubKey, birth: u64, look_ahead: u32) -> Wallet {
+    pub fn from_encrypted(encrypted: &[u8], public_master_key: ExtendedPubKey, birth: u64) -> Wallet {
         let master = MasterAccount::from_encrypted(encrypted, public_master_key, birth);
-        Wallet { coins: Coins::new(), master, look_ahead}
+        Wallet { coins: Coins::new(), master}
     }
 
     pub fn new(bitcoin_network: Network) -> Wallet {
@@ -122,8 +126,7 @@ impl Wallet {
         eprintln!();
         Wallet {
             master,
-            coins: Coins::new(),
-            look_ahead: KEY_LOOK_AHEAD
+            coins: Coins::new()
         }
     }
 }

@@ -34,7 +34,7 @@ use biadne::p2p_bitcoin::{ChainDBTrunk, P2PBitcoin};
 use biadne::p2p_biadnet::P2PBiadNet;
 use biadne::db::DB;
 use biadne::store::ContentStore;
-use biadne::wallet::Wallet;
+use biadne::wallet::{Wallet, KEY_LOOK_AHEAD};
 use futures::future::Empty;
 use murmel::chaindb::ChainDB;
 
@@ -234,14 +234,14 @@ pub fn main () {
         );
         {
             let mut tx = db.transaction();
-            let account = tx.read_account(0, 0, bitcoin_network).expect("can not read account 0/0");
+            let account = tx.read_account(0, 0, bitcoin_network, config.lookahead).expect("can not read account 0/0");
             master_account.add_account(account);
-            let account = tx.read_account(0, 1, bitcoin_network).expect("can not read account 0/1");
+            let account = tx.read_account(0, 1, bitcoin_network, config.lookahead).expect("can not read account 0/1");
             master_account.add_account(account);
-            let account = tx.read_account(1, 0, bitcoin_network).expect("can not read account 1/0");
+            let account = tx.read_account(1, 0, bitcoin_network, 0).expect("can not read account 1/0");
             master_account.add_account(account);
             let coins = tx.read_coins().expect ("can not read coins");
-            bitcoin_wallet = Wallet::from_storage(coins, master_account, config.lookahead);
+            bitcoin_wallet = Wallet::from_storage(coins, master_account);
         }
     } else {
 
@@ -253,7 +253,7 @@ pub fn main () {
             encryptedwalletkey: hex::encode(bitcoin_wallet.encrypted().as_slice()),
             keyroot: bitcoin_wallet.master_public().to_string(),
             birth: bitcoin_wallet.birth(),
-            lookahead: bitcoin_wallet.look_ahead()
+            lookahead: KEY_LOOK_AHEAD
         };
         {
             let mut tx = db.transaction();
@@ -263,7 +263,7 @@ pub fn main () {
         }
         fs::write(config_path, toml::to_string(&config).unwrap()).expect("can not write config file");
     };
-
+    info!("Wallet balance: {} satoshis", bitcoin_wallet.balance());
     eprintln!("Starting biadnet.");
     eprintln!("Observe progress in the log file.");
     eprintln!("Warnings and errors will be also printed to stderr.");
