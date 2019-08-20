@@ -20,6 +20,7 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 use crate::bitcoin_wallet::error::WalletError;
+use crate::bitcoin::blockdata::script;
 
 /// An error class to offer a unified error interface upstream
 pub enum BiadNetError {
@@ -30,7 +31,9 @@ pub enum BiadNetError {
     /// IO error
     IO(io::Error),
     /// DB error
-    DB(rusqlite::Error)
+    DB(rusqlite::Error),
+    /// script validation error
+    Script(script::Error)
 }
 
 impl Error for BiadNetError {
@@ -39,7 +42,8 @@ impl Error for BiadNetError {
             BiadNetError::Unsupported(ref s) => s,
             BiadNetError::Wallet(ref err) => err.description(),
             BiadNetError::IO(ref err) => err.description(),
-            BiadNetError::DB(ref err) => err.description()
+            BiadNetError::DB(ref err) => err.description(),
+            BiadNetError::Script(ref err) => err.description()
         }
     }
 
@@ -48,7 +52,8 @@ impl Error for BiadNetError {
             BiadNetError::Unsupported(_) => None,
             BiadNetError::Wallet(ref err) => Some(err),
             BiadNetError::IO(ref err) => Some(err),
-            BiadNetError::DB(ref err) => Some(err)
+            BiadNetError::DB(ref err) => Some(err),
+            BiadNetError::Script(ref err) => Some(err)
         }
     }
 }
@@ -62,6 +67,7 @@ impl fmt::Display for BiadNetError {
             BiadNetError::Wallet(ref s) => write!(f, "{}", s),
             BiadNetError::IO(ref s) => write!(f, "{}", s),
             BiadNetError::DB(ref s) =>  write!(f, "{}", s),
+            BiadNetError::Script(ref s) =>  write!(f, "{}", s),
         }
     }
 }
@@ -105,5 +111,11 @@ impl convert::From<serde_cbor::error::Error> for BiadNetError {
 impl convert::From<bitcoin_hashes::Error> for BiadNetError {
     fn from(_: bitcoin_hashes::Error) -> BiadNetError {
         BiadNetError::IO(io::Error::from(io::ErrorKind::InvalidInput))
+    }
+}
+
+impl convert::From<script::Error> for BiadNetError {
+    fn from(err: script::Error) -> BiadNetError {
+        BiadNetError::Script(err)
     }
 }

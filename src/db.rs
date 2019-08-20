@@ -47,6 +47,7 @@ use bitcoin_wallet::coins::{Coin, Coins};
 use bitcoin_wallet::proved::ProvedTransaction;
 use siphasher::sip::SipHasher;
 use byteorder::LittleEndian;
+use bitcoin::consensus::serialize;
 
 
 pub type SharedDB = Arc<Mutex<DB>>;
@@ -146,7 +147,22 @@ impl<'db> TX<'db> {
             create table if not exists processed (
                 block text
             );
+
+            create table if not exists txout (
+                txid text primary key,
+                tx blob
+                lastsend number,
+                confirmed text
+            ) without rowid;
         "#).expect("failed to create db tables");
+    }
+
+    pub fn store_txout (&mut self, tx: &bitcoin::Transaction) -> Result<(), BiadNetError> {
+        self.tx.execute(r#"
+            insert or replace into txout (txid, tx, lastsend, confirmed) values (?1, ?2, ?3, ?4)
+        "#, &[&tx.txid().to_string() as &ToSql,
+            &serialize(tx), &0i64, &("".to_string())])?;
+        Ok(())
     }
 
     pub fn read_seed(&mut self) -> Result<(u64, u64), BiadNetError> {

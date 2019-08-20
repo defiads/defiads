@@ -82,6 +82,15 @@ impl ContentStore {
             .next_key().expect("can not generate receiver address in 0/0").address.clone()
     }
 
+    pub fn withdraw (&mut self, passpharse: String, address: Address, fee_per_vbyte: u64, amount: Option<u64>) -> Result<sha256d::Hash, BiadNetError> {
+        let tx = self.wallet.withdraw(passpharse, address, fee_per_vbyte, amount)?;
+        let mut db = self.db.lock().unwrap();
+        let mut t = db.transaction();
+        t.store_txout(&tx)?;
+        t.commit();
+        Ok(tx.txid())
+    }
+
     pub fn get_nkeys (&self) -> u32 {
         self.n_keys
     }
@@ -109,7 +118,7 @@ impl ContentStore {
         let mut tx = db.transaction();
         if self.wallet.process(block) {
             tx.store_coins(&self.wallet.coins())?;
-            info!("New wallet balance {} satoshis", &self.wallet.coins().owned().values().map(|c| c.output.value).sum::<u64>());
+            info!("New wallet balance {} satoshis", &self.wallet.balance());
         }
         tx.store_processed(&block.header.bitcoin_hash())?;
         tx.commit();

@@ -17,12 +17,17 @@ use bitcoin::network::constants::Network;
 use bitcoin_hashes::sha256d;
 use bitcoin_wallet::account::{MasterAccount, Unlocker, AccountAddressType, Account, MasterKeyEntropy};
 use bitcoin::util::bip32::ExtendedPubKey;
-use bitcoin::{Block};
+use bitcoin::{Block, Transaction, Address, TxIn, Script, TxOut, SigHashType};
 use bitcoin_wallet::proved::ProvedTransaction;
 use bitcoin_wallet::coins::Coins;
+use crate::error::BiadNetError;
+use rand::{RngCore, thread_rng};
+use bitcoin::consensus::serialize;
 
 pub const KEY_LOOK_AHEAD: u32 = 10;
 const KEY_PURPOSE: u32 = 0xb1ad;
+const DUST :u64 = 546;
+const MAX_FEE_PER_BYTE: u64 = 100;
 
 pub struct Wallet {
     coins: Coins,
@@ -60,6 +65,73 @@ impl Wallet {
 
     pub fn prove (&self, txid: &sha256d::Hash) -> Option<&ProvedTransaction> {
         self.coins.proofs().get(txid)
+    }
+
+    pub fn withdraw (&mut self, passpharse: String, address: Address, mut fee_per_vbyte: u64, amount: Option<u64>) -> Result<Transaction, BiadNetError> {
+        let network = self.master.master_public().network;
+        let mut unlocker = Unlocker::new(
+            self.master.encrypted(), passpharse.as_str(), None,
+            network, Some(self.master.master_public()))?;
+        let balance = self.balance();
+        let amount = amount.unwrap_or(balance);
+        fee_per_vbyte = std::cmp::min(MAX_FEE_PER_BYTE, std::cmp::max(1, fee_per_vbyte));
+        let mut fee = 0;
+        let change_address = self.master.get_mut((0,1)).unwrap().next_key().unwrap().address.clone();
+        let coins = self.coins().get_coins(amount, |block_id, point, coin| {
+            true
+        });
+        let total_input = coins.iter().map(|(_,c)|c.output.value).sum::<u64>();
+        if amount > total_input {
+            return Err(BiadNetError::Unsupported("insufficient funds"));
+        }
+        let mut tx = Transaction {
+            input: coins.iter().map(|(point, _)|
+                TxIn {
+                    previous_output: point.clone(),
+                    script_sig: Script::new(),
+                    sequence: 0xffffffff,
+                    witness: vec![]
+                }).collect(),
+            output: Vec::new(),
+            version: 2,
+            lock_time: 0
+        };
+        loop {
+            tx.output.clear();
+            tx.output.push(TxOut {
+                value: amount - fee,
+                script_pubkey: address.script_pubkey()
+            });
+            if total_input > amount {
+                tx.output.insert((thread_rng().next_u32() % 2) as usize, TxOut {
+                    value: total_input - amount,
+                    script_pubkey: change_address.script_pubkey()
+                });
+            }
+            self.master.sign(&mut tx, SigHashType::All, &|point| {
+                coins.iter().find(|(o, _)| *o == *point).map(|(_, c)| c.output.clone())
+            }, &mut unlocker)?;
+            if fee == 0 {
+                fee = tx.get_weight() * fee_per_vbyte;
+                if fee > amount || (amount - fee) <= DUST {
+                    return Err(BiadNetError::Unsupported("withdraw amount is less than the fees needed"));
+                }
+            }
+            else {
+                let txs = serialize(&tx);
+                for (idx, (_, coin)) in coins.iter().enumerate() {
+                    coin.output.script_pubkey.verify(idx, coin.output.value, txs.as_slice())?;
+                }
+                if tx.output.len() > 1 {
+                    debug!("compiled transaction to withdraw {} to {}, change to {}, fee {}", amount - fee, address, change_address, fee);
+                }
+                else {
+                    debug!("compiled transaction to withdraw {} to {}, fee {}", amount - fee, address, fee);
+                }
+                break;
+            }
+        }
+        Ok(tx)
     }
 
     pub fn from_storage(coins: Coins, mut master: MasterAccount) -> Wallet {
