@@ -47,7 +47,7 @@ use bitcoin_wallet::coins::{Coin, Coins};
 use bitcoin_wallet::proved::ProvedTransaction;
 use siphasher::sip::SipHasher;
 use byteorder::LittleEndian;
-use bitcoin::consensus::serialize;
+use bitcoin::consensus::{serialize, deserialize};
 
 
 pub type SharedDB = Arc<Mutex<DB>>;
@@ -150,8 +150,7 @@ impl<'db> TX<'db> {
 
             create table if not exists txout (
                 txid text primary key,
-                tx blob
-                lastsend number,
+                tx blob,
                 confirmed text
             ) without rowid;
         "#).expect("failed to create db tables");
@@ -159,10 +158,24 @@ impl<'db> TX<'db> {
 
     pub fn store_txout (&mut self, tx: &bitcoin::Transaction) -> Result<(), BiadNetError> {
         self.tx.execute(r#"
-            insert or replace into txout (txid, tx, lastsend, confirmed) values (?1, ?2, ?3, ?4)
+            insert or replace into txout (txid, tx) values (?1, ?2)
         "#, &[&tx.txid().to_string() as &ToSql,
-            &serialize(tx), &0i64, &("".to_string())])?;
+            &serialize(tx)])?;
         Ok(())
+    }
+
+    pub fn read_unconfirmed (&mut self) -> Result<Vec<bitcoin::Transaction>, BiadNetError> {
+        let mut result = Vec::new();
+        // remove unconfirmed spend
+        let mut query = self.tx.prepare(r#"
+            select tx from txout where confirmed is null
+        "#)?;
+        for r in query.query_map(NO_PARAMS, |r| {
+            Ok(r.get_unwrap::<usize, Vec<u8>>(0))
+        })? {
+            result.push(deserialize::<bitcoin::Transaction>(r?.as_slice()).expect("can not deserialize stored transaction"));
+        }
+        Ok(result)
     }
 
     pub fn read_seed(&mut self) -> Result<(u64, u64), BiadNetError> {
@@ -206,7 +219,7 @@ impl<'db> TX<'db> {
             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
         "#)?;
         let proofs = coins.proofs();
-        for (outpoint, coin) in coins.owned() {
+        for (outpoint, coin) in coins.confirmed() {
             let tweak = if let Some(ref tweak) = coin.derivation.tweak {
                     hex::encode(tweak)
                 }
@@ -224,7 +237,8 @@ impl<'db> TX<'db> {
         Ok(())
     }
 
-    pub fn read_coins(&mut self) -> Result<Coins, BiadNetError> {
+    pub fn read_coins(&mut self, master_account:  &mut MasterAccount) -> Result<Coins, BiadNetError> {
+        // read confirmed
         let mut query = self.tx.prepare(r#"
             select txid, vout, value, script, account, sub, kix, tweak, proof from coins
         "#)?;
@@ -255,7 +269,18 @@ impl<'db> TX<'db> {
                 ))
         })? {
             let (point, coin, proof) = r?;
-            coins.add_from_storage(point, coin, proof);
+            coins.add_confirmed(point, coin, proof);
+        }
+
+        // remove unconfirmed spend
+        let mut query = self.tx.prepare(r#"
+            select tx from txout where confirmed is null
+        "#)?;
+        for r in query.query_map(NO_PARAMS, |r| {
+            Ok(r.get_unwrap::<usize, Vec<u8>>(0))
+        })? {
+            let tx = deserialize::<bitcoin::Transaction>(r?.as_slice()).expect("can not deserialize stored transaction");
+            coins.process_unconfirmed_transaction(master_account, &tx);
         }
         Ok(coins)
     }
@@ -716,7 +741,7 @@ mod test {
             // should not find if banned
             assert!(tx.get_an_address("biadnet", &HashSet::new()).unwrap().is_none());
 
-            let master = MasterAccount::new(MasterKeyEntropy::Recommended, Network::Bitcoin, "", None).unwrap();
+            let mut master = MasterAccount::new(MasterKeyEntropy::Recommended, Network::Bitcoin, "", None).unwrap();
             let mut unlocker = Unlocker::new(master.encrypted().as_slice(), "", None, Network::Bitcoin, Some(master.master_public())).unwrap();
             let account = Account::new(&mut unlocker, AccountAddressType::P2SHWPKH, 1, 2, 10).unwrap();
             tx.store_account(&account).unwrap();
@@ -725,7 +750,7 @@ mod test {
             let genesis = genesis_block(Network::Bitcoin);
 
             let mut coins = Coins::new();
-            coins.add_from_storage(
+            coins.add_confirmed(
                 OutPoint {
                     txid: genesis.txdata[0].bitcoin_hash(),
                     vout: 0
@@ -744,7 +769,7 @@ mod test {
                 },
                 ProvedTransaction::new(&genesis, 0));
             tx.store_coins(&coins).unwrap();
-            let other = tx.read_coins().unwrap();
+            let other = tx.read_coins(&mut master).unwrap();
             assert!(coins == other);
             tx.commit();
         }
@@ -769,6 +794,7 @@ mod test {
             tx.store_processed(&block.bitcoin_hash()).unwrap();
             assert_eq!(tx.read_processed().unwrap().unwrap(), block.bitcoin_hash());
             assert_eq!(tx.read_seed().unwrap(), tx.read_seed().unwrap());
+            tx.store_txout(&block.txdata[0]).unwrap();
             tx.commit();
         }
     }

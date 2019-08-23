@@ -240,8 +240,8 @@ pub fn main () {
             master_account.add_account(account);
             let account = tx.read_account(1, 0, bitcoin_network, 0).expect("can not read account 1/0");
             master_account.add_account(account);
-            let coins = tx.read_coins().expect ("can not read coins");
-            bitcoin_wallet = Wallet::from_storage(coins, master_account);
+            let coins = tx.read_coins(&mut master_account).expect ("can not read coins");
+            bitcoin_wallet = Wallet::from_storage(coins,master_account);
         }
     } else {
 

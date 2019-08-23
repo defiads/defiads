@@ -53,6 +53,7 @@ mod funding;
 mod discovery;
 mod trunk;
 mod blockdownload;
+pub mod sendtx;
 pub mod wallet;
 pub mod api;
 pub mod find_peers;

@@ -60,6 +60,7 @@ use std::time::Duration;
 use futures::task::Waker;
 use crate::trunk::Trunk;
 use crate::blockdownload::BlockDownload;
+use crate::sendtx::SendTx;
 
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
@@ -144,6 +145,9 @@ impl P2PBitcoin {
         }
         dispatcher.add_listener(BlockDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout.clone(), downstream, processed_block, self.birth));
         dispatcher.add_listener(Ping::new(p2p_control.clone(), timeout.clone()));
+
+        let sendtx = SendTx::new(p2p_control.clone(), self.db.clone());
+        self.content_store.write().unwrap().set_tx_sender(sendtx);
 
         let p2p2 = p2p.clone();
         let p2p_task = Box::new(future::poll_fn(move |ctx| {

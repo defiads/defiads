@@ -32,6 +32,8 @@ use std::collections::HashMap;
 use crate::iblt::add_to_min_sketch;
 use crate::trunk::Trunk;
 use crate::wallet::Wallet;
+use bitcoin::network::message::NetworkMessage;
+use crate::sendtx::TxSender;
 
 const MIN_SKETCH_SIZE: usize = 20;
 
@@ -47,7 +49,8 @@ pub struct ContentStore {
     min_sketch: Vec<u64>,
     ksequence: Vec<(u64, u64)>,
     n_keys: u32,
-    wallet: Wallet
+    wallet: Wallet,
+    txout: Option<TxSender>
 }
 
 impl ContentStore {
@@ -73,8 +76,13 @@ impl ContentStore {
             min_sketch: mins,
             ksequence,
             n_keys,
-            wallet
+            wallet,
+            txout: None
         })
+    }
+
+    pub fn set_tx_sender(&mut self, txout: TxSender) {
+        self.txout = Some(txout);
     }
 
     pub fn deposit_address(&mut self) -> Address {
@@ -84,11 +92,11 @@ impl ContentStore {
 
     pub fn withdraw (&mut self, passpharse: String, address: Address, fee_per_vbyte: u64, amount: Option<u64>) -> Result<sha256d::Hash, BiadNetError> {
         let tx = self.wallet.withdraw(passpharse, address, fee_per_vbyte, amount)?;
-        let mut db = self.db.lock().unwrap();
-        let mut t = db.transaction();
-        t.store_txout(&tx)?;
-        t.commit();
-        Ok(tx.txid())
+        let txid = tx.txid();
+        if let Some(ref txout) = self.txout {
+            txout.send(NetworkMessage::Tx(tx));
+        }
+        Ok(txid)
     }
 
     pub fn get_nkeys (&self) -> u32 {
@@ -118,7 +126,7 @@ impl ContentStore {
         let mut tx = db.transaction();
         if self.wallet.process(block) {
             tx.store_coins(&self.wallet.coins())?;
-            info!("New wallet balance {} satoshis", &self.wallet.balance());
+            info!("New wallet balance {} satoshis {} unconfirmed", self.wallet.balance(), self.wallet.unconfirmed_balance());
         }
         tx.store_processed(&block.header.bitcoin_hash())?;
         tx.commit();
