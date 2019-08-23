@@ -263,7 +263,7 @@ pub fn main () {
         }
         fs::write(config_path, toml::to_string(&config).unwrap()).expect("can not write config file");
     };
-    info!("Wallet balance: {} satoshis", bitcoin_wallet.balance());
+    info!("Wallet balance: {} satoshis {} unconfirmed", bitcoin_wallet.balance(), bitcoin_wallet.unconfirmed_balance());
     eprintln!("Starting biadnet.");
     eprintln!("Observe progress in the log file.");
     eprintln!("Warnings and errors will be also printed to stderr.");
