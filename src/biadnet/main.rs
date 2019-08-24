@@ -170,7 +170,7 @@ pub fn main () {
     let level = log::LevelFilter::from_str(matches.value_of("log-level").unwrap()).unwrap();
     let log_file = matches.value_of("log-file").unwrap();
     let mut log_config = simplelog::Config::default();
-    log_config.filter_ignore = Some(&["tokio_reactor"]);
+    log_config.filter_ignore = Some(&["tokio"]);
     simplelog::CombinedLogger::init(
         vec![
             simplelog::TermLogger::new(log::LevelFilter::Warn, simplelog::Config::default(), simplelog::TerminalMode::Stderr).unwrap(),

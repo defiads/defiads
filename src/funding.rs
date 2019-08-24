@@ -38,7 +38,7 @@ pub fn funding_script (funder: &PublicKey, digest: &sha256::Hash, term: u16, ctx
 
     let script = Builder::new()
         .push_slice(&buf[0..3])
-        .push_opcode(all::OP_NOP3) // OP_CHECKSEQUENCEVERIFY
+        .push_opcode(all::OP_CSV)
         .push_opcode(all::OP_DROP)
         .push_slice(tweaked.to_bytes().as_slice())
         .push_opcode(all::OP_CHECKSIGVERIFY)

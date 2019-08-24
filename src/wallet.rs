@@ -118,7 +118,7 @@ impl Wallet {
                 coins.iter().find(|(o, _)| *o == *point).map(|(_, c)| c.output.clone())
             }, &mut unlocker)?;
             if fee == 0 {
-                fee = tx.get_weight() * fee_per_vbyte;
+                fee = serialize(&tx).len() as u64 * fee_per_vbyte;
                 if fee > amount || (amount - fee) <= DUST {
                     return Err(BiadNetError::Unsupported("withdraw amount is less than the fees needed"));
                 }

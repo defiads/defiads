@@ -114,6 +114,12 @@ impl convert::From<bitcoin_hashes::Error> for BiadNetError {
     }
 }
 
+impl convert::From<bitcoin_hashes::hex::Error> for BiadNetError {
+    fn from(_: bitcoin_hashes::hex::Error) -> BiadNetError {
+        BiadNetError::IO(io::Error::from(io::ErrorKind::InvalidInput))
+    }
+}
+
 impl convert::From<script::Error> for BiadNetError {
     fn from(err: script::Error) -> BiadNetError {
         BiadNetError::Script(err)

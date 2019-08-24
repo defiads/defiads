@@ -15,11 +15,12 @@ serde = "1"
 serde_derive = "1"
 serde_cbor = "0.10"
 serde_json = "1.0"
-bitcoin_hashes={version="0.3", features=["serde"]}
-bitcoin={version="0.18", features=["serde", "bitcoinconsensus"]}
-secp256k1={version="0.12", features=["rand", "serde"]}
+bitcoin_hashes={version="0.7", features=["serde"]}
+bitcoin={ git= "https://github.com/tamasblummer/rust-bitcoin.git", branch = "add_serde_to_block", features=["serde", "bitcoinconsensus"]}
+secp256k1={version="0.15", features=["rand", "serde"]}
 bitcoin-wallet={git="https://github.com/tamasblummer/rust-wallet.git", branch = "master"}
-murmel={git="https://github.com/tamasblummer/murmel.git", branch = "master"}
+#murmel={git="https://github.com/tamasblummer/murmel.git", branch = "master"}
+murmel={path="../murmel"}
 siphasher="0.3"
 rand = "0.7"
 rand_distr = "0.2"

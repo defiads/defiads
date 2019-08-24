@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 use bitcoin::{BitcoinHash, blockdata::{
-    block::LoneBlockHeader,
+    block::BlockHeader,
 }, network::{
     message::NetworkMessage,
     message_blockdata::{GetHeadersMessage, Inventory, InvType},
@@ -216,7 +216,7 @@ impl BlockDownload {
         }
     }
 
-    fn headers(&mut self, headers: &Vec<LoneBlockHeader>, peer: PeerId) {
+    fn headers(&mut self, headers: &Vec<BlockHeader>, peer: PeerId) {
         self.timeout.lock().unwrap().received(peer, 1, ExpectedReply::Headers);
 
         if headers.len() > 0 {
@@ -244,7 +244,7 @@ impl BlockDownload {
                     let mut chaindb = self.chaindb.write().unwrap();
                     while let Some(header) = headers_queue.pop_front() {
                         // add to blockchain - this also checks proof of work
-                        match chaindb.add_header(&header.header) {
+                        match chaindb.add_header(&header) {
                             Ok(Some((stored, unwinds, forwards))) => {
                                 connected_headers.push((stored.height, stored.header));
                                 // POW is ok, stored top chaindb
@@ -267,7 +267,7 @@ impl BlockDownload {
                                 self.p2p.ban(peer, 100);
                             }
                             Err(e) => {
-                                debug!("error {} processing header {} ", e, header.header.bitcoin_hash());
+                                debug!("error {} processing header {} ", e, header.bitcoin_hash());
                             }
                         }
                     }
