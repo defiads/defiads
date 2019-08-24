@@ -164,7 +164,7 @@ impl<'db> TX<'db> {
         Ok(())
     }
 
-    pub fn read_unconfirmed (&mut self) -> Result<Vec<bitcoin::Transaction>, BiadNetError> {
+    pub fn read_unconfirmed (&self) -> Result<Vec<bitcoin::Transaction>, BiadNetError> {
         let mut result = Vec::new();
         // remove unconfirmed spend
         let mut query = self.tx.prepare(r#"
@@ -234,6 +234,15 @@ impl<'db> TX<'db> {
                 &serde_cbor::ser::to_vec(&proof).expect("can not serialize proof")
             ])?;
         }
+
+        for unconfirmed in self.read_unconfirmed()? {
+            if let Some(proof) = proofs.values().find(|p| p.get_transaction().txid() == unconfirmed.txid()) {
+                self.tx.execute (r#"
+                    update txout set confirmed = ?1 where txid = ?2
+                "#, &[&proof.get_block_hash().to_string() as &ToSql, &proof.get_transaction().txid().to_string()])?;
+            }
+        }
+
         Ok(())
     }
 

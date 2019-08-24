@@ -85,9 +85,7 @@ impl Wallet {
         fee_per_vbyte = std::cmp::min(MAX_FEE_PER_BYTE, std::cmp::max(1, fee_per_vbyte));
         let mut fee = 0;
         let change_address = self.master.get_mut((0,1)).unwrap().next_key().unwrap().address.clone();
-        let coins = self.coins().get_confirmed_coins(amount, |_, _, _| {
-            true
-        });
+        let coins = self.coins.get_confirmed_coins(amount, |_, _, _| { true });
         let total_input = coins.iter().map(|(_,c)|c.output.value).sum::<u64>();
         if amount > total_input {
             return Err(BiadNetError::Unsupported("insufficient funds"));

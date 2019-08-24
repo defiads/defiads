@@ -62,7 +62,7 @@ impl SendTx {
                 }
             }
             let mut db = self.db.lock().unwrap();
-            let mut tx = db.transaction();
+            let tx = db.transaction();
             for transaction in tx.read_unconfirmed().expect("can not read txout db") {
                 self.p2p.send_random_network(NetworkMessage::Tx(transaction));
             }
