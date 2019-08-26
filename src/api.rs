@@ -127,8 +127,8 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore, apikey: S
         Ok(serde_json::to_value(moved_store.write().unwrap().deposit_address().to_string()).unwrap())
     });
 
-    // get deposit address
-    // METHOD: deposit
+    // withdraw
+    // METHOD: withdraw
     // ARGUMENTS: target_address, fee_per_byte, [amount]
     // if amount is not specified it withdraws all. Amount is in satoshis, fee is in satoshi/vByte
     // answer is (ordered by category name and weight descending):
