@@ -180,6 +180,7 @@ pub fn main () {
     info!("biadnet starting, with log-level {}", level);
 
     let bitcoin_network = matches.value_of("bitcoin-network").unwrap().parse::<Network>().unwrap();
+    info!("Connecting to {} network", bitcoin_network);
     let mut biadnet_connections = matches.value_of("biadnet-connections").unwrap().parse::<usize>().unwrap();
     let mut bitcoin_connections = matches.value_of("bitcoin-connections").unwrap().parse::<usize>().unwrap();
 
@@ -232,6 +233,7 @@ pub fn main () {
             ExtendedPubKey::from_str(config.keyroot.as_str()).expect("keyroot is malformed"),
             config.birth
         );
+        assert_eq!(bitcoin_network, master_account.master_public().network);
         {
             let mut tx = db.transaction();
             let account = tx.read_account(0, 0, bitcoin_network, config.lookahead).expect("can not read account 0/0");
