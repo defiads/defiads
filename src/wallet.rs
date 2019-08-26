@@ -27,7 +27,8 @@ use bitcoin::consensus::serialize;
 pub const KEY_LOOK_AHEAD: u32 = 10;
 const KEY_PURPOSE: u32 = 0xb1ad;
 const DUST :u64 = 546;
-const MAX_FEE_PER_BYTE: u64 = 100;
+const MAX_FEE_PER_VBYTE: u64 = 100;
+const MIN_FEE_PER_VBYTE: u64 = 1;
 
 pub struct Wallet {
     coins: Coins,
@@ -82,7 +83,7 @@ impl Wallet {
             network, Some(self.master.master_public()))?;
         let balance = self.confirmed_balance();
         let amount = amount.unwrap_or(balance);
-        fee_per_vbyte = std::cmp::min(MAX_FEE_PER_BYTE, std::cmp::max(1, fee_per_vbyte));
+        fee_per_vbyte = std::cmp::min(MAX_FEE_PER_VBYTE, std::cmp::max(MIN_FEE_PER_VBYTE, fee_per_vbyte));
         let mut fee = 0;
         let change_address = self.master.get_mut((0,1)).unwrap().next_key().unwrap().address.clone();
         let coins = self.coins.get_confirmed_coins(amount);
@@ -104,24 +105,34 @@ impl Wallet {
         };
         loop {
             tx.output.clear();
-            tx.output.push(TxOut {
-                value: amount - fee,
-                script_pubkey: address.script_pubkey()
-            });
             if total_input > amount {
-                tx.output.insert((thread_rng().next_u32() % 2) as usize, TxOut {
-                    value: total_input - amount,
-                    script_pubkey: change_address.script_pubkey()
+                tx.output.push(TxOut {
+                    value: amount,
+                    script_pubkey: address.script_pubkey()
                 });
+                if total_input - amount > fee + DUST {
+                    tx.output.insert((thread_rng().next_u32() % 2) as usize, TxOut {
+                        value: total_input - amount - fee,
+                        script_pubkey: change_address.script_pubkey()
+                    });
+                }
+            }
+            else {
+                if amount - fee > DUST {
+                    tx.output.push(TxOut {
+                        value: amount - fee,
+                        script_pubkey: address.script_pubkey()
+                    });
+                }
+                else {
+                    return Err(BiadNetError::Unsupported("withdraw amount is less than the fees needed (+DUST limit)"));
+                }
             }
             self.master.sign(&mut tx, SigHashType::All, &|point| {
                 coins.iter().find(|(o, _)| *o == *point).map(|(_, c)| c.output.clone())
             }, &mut unlocker)?;
             if fee == 0 {
-                fee = (tx.get_weight() as u64 * fee_per_vbyte)/4;
-                if fee > amount || (amount - fee) <= DUST {
-                    return Err(BiadNetError::Unsupported("withdraw amount is less than the fees needed"));
-                }
+                fee = (tx.get_weight() as u64 * fee_per_vbyte + 3)/4;
             }
             else {
                 let txs = serialize(&tx);
