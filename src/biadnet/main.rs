@@ -145,12 +145,6 @@ pub fn main () {
             .help("Configuration file in .toml format")
             .takes_value(true)
             .default_value("biadnet.cfg"))
-        .arg(Arg::with_name("log-file")
-            .value_name("FILE")
-            .long("log-file")
-            .help("Log file path.")
-            .takes_value(true)
-            .default_value("biadnet.log"))
         .arg(Arg::with_name("bitcoin-discovery")
             .long("bitcoin-discovery")
             .help("Enable/Disable bitcoin network discovery")
@@ -167,20 +161,29 @@ pub fn main () {
             .default_value("ON"))
         .get_matches();
 
+    let bitcoin_network = matches.value_of("bitcoin-network").unwrap().parse::<Network>().unwrap();
+
+    let mut workdir = dirs::home_dir().expect("unknown home directory");
+    workdir.push(".biadnet");
+    workdir.push(bitcoin_network.to_string());
+    fs::DirBuilder::new().recursive(true).create(workdir.clone()).expect("can not create work directory");
+
+
     let level = log::LevelFilter::from_str(matches.value_of("log-level").unwrap()).unwrap();
-    let log_file = matches.value_of("log-file").unwrap();
+    let mut log_file = workdir.clone();
+    log_file.push("biadnet.log");
     let mut log_config = simplelog::Config::default();
     log_config.filter_ignore = Some(&["tokio"]);
     simplelog::CombinedLogger::init(
         vec![
             simplelog::TermLogger::new(log::LevelFilter::Warn, simplelog::Config::default(), simplelog::TerminalMode::Stderr).unwrap(),
-            simplelog::WriteLogger::new(level, log_config, std::fs::File::create(log_file).unwrap()),
+            simplelog::WriteLogger::new(level, log_config, std::fs::File::create(log_file.clone()).unwrap()),
         ]
     ).unwrap();
-    info!("biadnet starting, with log-level {}", level);
-
-    let bitcoin_network = matches.value_of("bitcoin-network").unwrap().parse::<Network>().unwrap();
-    info!("Connecting to {} network", bitcoin_network);
+    eprintln!("Starting biadnet, connected to {} network.", bitcoin_network);
+    eprintln!("Observe progress in the log file: {}", log_file.as_path().display());
+    eprintln!("Warnings and errors will be also printed to stderr.");
+    info!("biadnet connects to {} network", bitcoin_network);
     let mut biadnet_connections = matches.value_of("biadnet-connections").unwrap().parse::<usize>().unwrap();
     let mut bitcoin_connections = matches.value_of("bitcoin-connections").unwrap().parse::<usize>().unwrap();
 
@@ -206,14 +209,27 @@ pub fn main () {
         biadnet_connections = biadnet_peers.len();
     }
 
-    let http_rpc = matches.value_of("http-rpc").map(|s| SocketAddr::from_str(s).expect("invalid socket address"));
+    let http_rpc = matches.value_of("http-rpc").map(|s| {
+        let mut sock = SocketAddr::from_str(s).expect("invalid socket address");
+        if bitcoin_network != Network::Bitcoin {
+            sock.set_port(sock.port() + 100);
+        }
+        sock
+    });
     let biadnet_listen = matches.values_of("listen").unwrap_or_default().map(
-        |s| SocketAddr::from_str(s).expect("invalid socket address")).collect();
+        |s|
+            {
+                let mut sock = SocketAddr::from_str(s).expect("invalid socket address");
+                if bitcoin_network != Network::Bitcoin {
+                    sock.set_port(sock.port() + 100);
+                }
+                sock
+            }).collect();
 
-    let db_name = matches.value_of("db").unwrap();
-    let db_path = std::path::Path::new(db_name);
+    let mut db_path = workdir.clone();
+    db_path.push(matches.value_of("db").unwrap());
 
-    let mut db = DB::new(db_path).expect("can not open db");
+    let mut db = DB::new(db_path.as_path()).expect("can not open db");
     {
         let mut tx = db.transaction();
         tx.create_tables();
@@ -222,11 +238,12 @@ pub fn main () {
 
     let storage_limit = matches.value_of("storage-limit").unwrap().parse::<u64>().expect("expecting number of GB") * 1000*1000;
 
-    let config_path = std::path::Path::new(matches.value_of("config").unwrap());
+    let mut config_path = workdir.clone();
+    config_path.push(matches.value_of("config").unwrap());
 
     let bitcoin_wallet;
     let config;
-    if let Ok(config_string) = fs::read_to_string( config_path) {
+    if let Ok(config_string) = fs::read_to_string( config_path.clone()) {
         config = toml::from_str::<Config>(config_string.as_str()).expect("can not parse config file");
         let mut master_account = MasterAccount::from_encrypted(
             hex::decode(config.encryptedwalletkey).expect("encryptedwalletkey is not hex").as_slice(),
@@ -266,11 +283,8 @@ pub fn main () {
         fs::write(config_path, toml::to_string(&config).unwrap()).expect("can not write config file");
     };
     info!("Wallet balance: {} satoshis {} unconfirmed", bitcoin_wallet.balance(), bitcoin_wallet.unconfirmed_balance());
-    eprintln!("Starting biadnet.");
-    eprintln!("Observe progress in the log file.");
-    eprintln!("Warnings and errors will be also printed to stderr.");
 
-    let mut chaindb = ChainDB::new(db_path, bitcoin_network, 0).expect("can not open chain db");
+    let mut chaindb = ChainDB::new(db_path.as_path(), bitcoin_network, 0).expect("can not open chain db");
     chaindb.init(false).expect("can not initialize db");
     let chaindb = Arc::new(RwLock::new(chaindb));
 
