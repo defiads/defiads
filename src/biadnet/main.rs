@@ -173,7 +173,7 @@ pub fn main () {
     let mut log_file = workdir.clone();
     log_file.push("biadnet.log");
     let mut log_config = simplelog::Config::default();
-    log_config.filter_ignore = Some(&["tokio"]);
+    log_config.filter_ignore = Some(&["tokio", "hyper"]);
     simplelog::CombinedLogger::init(
         vec![
             simplelog::TermLogger::new(log::LevelFilter::Warn, simplelog::Config::default(), simplelog::TerminalMode::Stderr).unwrap(),

@@ -96,6 +96,7 @@ impl ContentStore {
         if let Some(ref txout) = self.txout {
             txout.send(NetworkMessage::Tx(tx));
         }
+        info!("Wallet balance: {} satoshis {} unconfirmed", self.wallet.balance(), self.wallet.unconfirmed_balance());
         Ok(txid)
     }
 
