@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use murmel::p2p::{P2PControlSender};
+use murmel::p2p::{P2PControlSender, PeerMessageSender, PeerMessage, PeerMessageReceiver};
 use bitcoin::network::message::NetworkMessage;
 use crate::db::SharedDB;
 use std::{
@@ -21,6 +21,7 @@ use std::{
     sync::{Arc, mpsc, Mutex}
 };
 use std::time::Duration;
+use bitcoin::network::message_blockdata::{Inventory, InvType};
 
 pub struct TxSender {
     sender: Arc<Mutex<mpsc::Sender<NetworkMessage>>>
@@ -43,9 +44,43 @@ impl SendTx {
 
         let mut txsender = SendTx { p2p, db };
 
-        thread::Builder::new().name("sendtx".to_string()).spawn(move || { txsender.run(receiver) }).unwrap();
+        thread::Builder::new().name("sendinv".to_string()).spawn(move || { txsender.run(receiver) }).unwrap();
 
         TxSender{ sender: Arc::new(Mutex::new(sender)) }
+    }
+
+    pub fn new_sender(p2p: P2PControlSender<NetworkMessage>, db: SharedDB) -> PeerMessageSender<NetworkMessage> {
+        let (sender, receiver) = mpsc::sync_channel(p2p.back_pressure);
+        let mut txsender = SendTx { p2p, db };
+
+        thread::Builder::new().name("sendtx".to_string()).spawn(move || { txsender.send(receiver) }).unwrap();
+
+        PeerMessageSender::new(sender)
+    }
+
+    fn send(&mut self, receiver:  PeerMessageReceiver<NetworkMessage>) {
+        while let Ok(msg) = receiver.recv() {
+            match msg {
+                PeerMessage::Message(pid, msg) => {
+                    match msg {
+                        NetworkMessage::GetData(ref inv) => {
+                            let txs = inv.iter().filter_map(|i| if i.inv_type == InvType::Transaction {Some(i.hash)} else {None}).collect::<Vec<_>>();
+                            if !txs.is_empty() {
+                                let mut db = self.db.lock().unwrap();
+                                let tx = db.transaction();
+                                let unconfirmed = tx.read_unconfirmed().expect("can not read unconfirmed transactions");
+                                for transaction in unconfirmed.iter().filter(|t| txs.contains(&t.txid())) {
+                                    self.p2p.send_network(pid, NetworkMessage::Tx(transaction.clone()));
+                                    debug!("sent our transaction {} at request of peer={}", transaction.txid(), pid);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     fn run(&mut self, receiver: mpsc::Receiver<NetworkMessage>) {
@@ -64,7 +99,9 @@ impl SendTx {
             let mut db = self.db.lock().unwrap();
             let tx = db.transaction();
             for transaction in tx.read_unconfirmed().expect("can not read txout db") {
-                self.p2p.send_random_network(NetworkMessage::Tx(transaction));
+                if let Some(peer) = self.p2p.send_random_network(NetworkMessage::Inv(vec!(Inventory{hash: transaction.txid(), inv_type: InvType::Transaction}))) {
+                    debug!("announced our transaction {} to peer={}", transaction.txid(), peer);
+                }
             }
         }
     }

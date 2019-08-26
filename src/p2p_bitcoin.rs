@@ -145,6 +145,7 @@ impl P2PBitcoin {
         }
         dispatcher.add_listener(BlockDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout.clone(), downstream, processed_block, self.birth));
         dispatcher.add_listener(Ping::new(p2p_control.clone(), timeout.clone()));
+        dispatcher.add_listener(SendTx::new_sender(p2p_control.clone(), self.db.clone()));
 
         let sendtx = SendTx::new(p2p_control.clone(), self.db.clone());
         self.content_store.write().unwrap().set_tx_sender(sendtx);
