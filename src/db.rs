@@ -258,7 +258,7 @@ impl<'db> TX<'db> {
                     vout: r.get_unwrap::<usize, u32>(1)},
                 Coin{
                     output: TxOut{script_pubkey: Script::from(r.get_unwrap::<usize,Vec<u8>>(3)),
-                        value: r.get_unwrap::<usize, i32>(2) as u64},
+                        value: r.get_unwrap::<usize, i64>(2) as u64},
                     derivation: KeyDerivation {
                         account: r.get_unwrap::<usize, u32> (4),
                         sub: r.get_unwrap::<usize, u32> (5),
