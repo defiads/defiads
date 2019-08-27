@@ -145,9 +145,9 @@ impl P2PBitcoin {
         }
         dispatcher.add_listener(BlockDownload::new(self.chaindb.clone(), p2p_control.clone(), timeout.clone(), downstream, processed_block, self.birth));
         dispatcher.add_listener(Ping::new(p2p_control.clone(), timeout.clone()));
-        dispatcher.add_listener(SendTx::new_sender(p2p_control.clone(), self.db.clone()));
 
         let sendtx = SendTx::new(p2p_control.clone(), self.db.clone());
+        dispatcher.add_listener(sendtx.clone());
         self.content_store.write().unwrap().set_tx_sender(sendtx);
 
         let p2p2 = p2p.clone();
@@ -203,6 +203,10 @@ impl Future for KeepConnected {
     type Error = Never;
 
     fn poll(&mut self, cx: &mut task::Context) -> Poll<Self::Item, Self::Error> {
+        {
+            let mut waker = self.waker.lock().unwrap();
+            *waker = Some(cx.waker().clone());
+        }
         // find a finished peers
         let finished = self.connections.iter_mut().enumerate().filter_map(|(i, (_, c))| {
             match c.poll(cx) {
@@ -236,8 +240,6 @@ impl Future for KeepConnected {
                 }
             }
         }
-        let mut waker = self.waker.lock().unwrap();
-        *waker = Some(cx.waker().clone());
         return Ok(Async::Pending);
     }
 }
@@ -314,7 +316,7 @@ impl AddressPoolMaintainer {
                         }
                     }
                 }
-                PeerMessage::Message(pid, msg) => {
+                PeerMessage::Incoming(pid, msg) => {
                     match msg {
                         NetworkMessage::Addr(av) => {
                             let mut db = self.db.lock().unwrap();
@@ -332,7 +334,8 @@ impl AddressPoolMaintainer {
                         }
                         _ => { }
                     }
-                }
+                },
+                _ => {}
             }
         }
     }

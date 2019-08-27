@@ -33,7 +33,7 @@ use crate::iblt::add_to_min_sketch;
 use crate::trunk::Trunk;
 use crate::wallet::Wallet;
 use bitcoin::network::message::NetworkMessage;
-use crate::sendtx::TxSender;
+use murmel::p2p::{PeerMessageSender, PeerMessage};
 
 const MIN_SKETCH_SIZE: usize = 20;
 
@@ -50,7 +50,7 @@ pub struct ContentStore {
     ksequence: Vec<(u64, u64)>,
     n_keys: u32,
     wallet: Wallet,
-    txout: Option<TxSender>
+    txout: Option<PeerMessageSender<NetworkMessage>>
 }
 
 impl ContentStore {
@@ -81,7 +81,7 @@ impl ContentStore {
         })
     }
 
-    pub fn set_tx_sender(&mut self, txout: TxSender) {
+    pub fn set_tx_sender(&mut self, txout: PeerMessageSender<NetworkMessage>) {
         self.txout = Some(txout);
     }
 
@@ -94,7 +94,7 @@ impl ContentStore {
         let tx = self.wallet.withdraw(passpharse, address, fee_per_vbyte, amount)?;
         let txid = tx.txid();
         if let Some(ref txout) = self.txout {
-            txout.send(NetworkMessage::Tx(tx));
+            txout.send(PeerMessage::Outgoing(NetworkMessage::Tx(tx)));
         }
         info!("Wallet balance: {} satoshis {} unconfirmed", self.wallet.balance(), self.wallet.unconfirmed_balance());
         Ok(txid)

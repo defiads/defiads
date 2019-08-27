@@ -156,6 +156,19 @@ impl<'db> TX<'db> {
         "#).expect("failed to create db tables");
     }
 
+    pub fn rescan(&mut self, after: &sha256d::Hash) -> Result<(), BiadNetError> {
+        self.tx.execute(r#"
+            update processed set block = ?1
+        "#, &[&after.to_string() as &ToSql])?;
+        self.tx.execute(r#"
+            delete from txout
+        "#, NO_PARAMS)?;
+        self.tx.execute(r#"
+            delete from coins
+        "#, NO_PARAMS)?;
+        Ok(())
+    }
+
     pub fn store_txout (&mut self, tx: &bitcoin::Transaction) -> Result<(), BiadNetError> {
         self.tx.execute(r#"
             insert or replace into txout (txid, tx) values (?1, ?2)
@@ -804,6 +817,7 @@ mod test {
             assert_eq!(tx.read_processed().unwrap().unwrap(), block.bitcoin_hash());
             assert_eq!(tx.read_seed().unwrap(), tx.read_seed().unwrap());
             tx.store_txout(&block.txdata[0]).unwrap();
+            tx.rescan(&block.header.bitcoin_hash()).unwrap();
             tx.commit();
         }
     }

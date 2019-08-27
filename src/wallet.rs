@@ -68,6 +68,10 @@ impl Wallet {
         self.coins.unwind_tip(block_hash)
     }
 
+    pub fn rescan(&mut self) {
+        self.coins = Coins::new();
+    }
+
     pub fn process(&mut self, block: &Block) -> bool {
         self.coins.process(&mut self.master, block)
     }
@@ -105,28 +109,20 @@ impl Wallet {
         };
         loop {
             tx.output.clear();
-            if total_input > amount {
+            if amount - fee > DUST {
                 tx.output.push(TxOut {
-                    value: amount,
+                    value: amount - fee,
                     script_pubkey: address.script_pubkey()
                 });
-                if total_input - amount > fee + DUST {
-                    tx.output.insert((thread_rng().next_u32() % 2) as usize, TxOut {
-                        value: total_input - amount - fee,
-                        script_pubkey: change_address.script_pubkey()
-                    });
-                }
             }
             else {
-                if amount - fee > DUST {
-                    tx.output.push(TxOut {
-                        value: amount - fee,
-                        script_pubkey: address.script_pubkey()
-                    });
-                }
-                else {
-                    return Err(BiadNetError::Unsupported("withdraw amount is less than the fees needed (+DUST limit)"));
-                }
+                return Err(BiadNetError::Unsupported("withdraw amount is less than the fees needed (+DUST limit)"));
+            }
+            if total_input > amount && (total_input - amount) > DUST {
+                tx.output.insert((thread_rng().next_u32() % 2) as usize, TxOut {
+                    value: total_input - amount,
+                    script_pubkey: change_address.script_pubkey()
+                });
             }
             self.master.sign(&mut tx, SigHashType::All, &|point| {
                 coins.iter().find(|(o, _)| *o == *point).map(|(_, c)| c.output.clone())

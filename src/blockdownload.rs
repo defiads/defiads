@@ -101,7 +101,7 @@ impl BlockDownload {
                             }
                         }
                     }
-                    PeerMessage::Message(pid, msg) => {
+                    PeerMessage::Incoming(pid, msg) => {
                         match msg {
                             NetworkMessage::Headers(ref headers) => if self.is_serving_blocks(pid) { self.headers(headers, pid); },
                             NetworkMessage::Inv(ref inv) => if self.is_serving_blocks(pid) { self.inv(inv, pid); },
@@ -114,7 +114,8 @@ impl BlockDownload {
                         if pid == self.block_download_peer.unwrap() {
                             self.ask_blocks(pid)
                         }
-                    }
+                    },
+                    _ => {}
                 }
             }
             self.timeout.lock().unwrap().check(vec!(ExpectedReply::Headers, ExpectedReply::Block));
@@ -186,11 +187,6 @@ impl BlockDownload {
                     // ask for header(s) if observing a new block
                     ask_for_headers = true;
                 }
-            } else {
-                // do not spam us with transactions
-                debug!("received unsolicited inv {:?} peer={}", inventory.inv_type, peer);
-                self.p2p.ban(peer, 10);
-                return;
             }
         }
         if ask_for_headers {

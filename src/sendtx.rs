@@ -15,93 +15,122 @@
 //
 use murmel::p2p::{P2PControlSender, PeerMessageSender, PeerMessage, PeerMessageReceiver};
 use bitcoin::network::message::NetworkMessage;
+use bitcoin_hashes::sha256d;
 use crate::db::SharedDB;
 use std::{
     thread,
-    sync::{Arc, mpsc, Mutex}
+    sync::{mpsc},
+    collections::HashMap,
+    time::{SystemTime}
 };
-use std::time::Duration;
 use bitcoin::network::message_blockdata::{Inventory, InvType};
-
-pub struct TxSender {
-    sender: Arc<Mutex<mpsc::Sender<NetworkMessage>>>
-}
-
-impl TxSender {
-    pub fn send(&self, msg: NetworkMessage) {
-        self.sender.lock().unwrap().send(msg).expect("can not send tx to sender queue");
-    }
-}
+use lru_cache::LruCache;
+use bitcoin::Transaction;
 
 pub struct SendTx {
     p2p: P2PControlSender<NetworkMessage>,
-    db: SharedDB
+    db: SharedDB,
+    cache: LruCache<sha256d::Hash, Transaction>,
+    own_unconfirmed: HashMap<sha256d::Hash, Transaction>
 }
 
+const CACHE_SIZE: usize=1000;
+
 impl SendTx {
-    pub fn new(p2p: P2PControlSender<NetworkMessage>, db: SharedDB) -> TxSender {
-        let (sender, receiver) = mpsc::channel();
-
-        let mut txsender = SendTx { p2p, db };
-
-        thread::Builder::new().name("sendinv".to_string()).spawn(move || { txsender.run(receiver) }).unwrap();
-
-        TxSender{ sender: Arc::new(Mutex::new(sender)) }
-    }
-
-    pub fn new_sender(p2p: P2PControlSender<NetworkMessage>, db: SharedDB) -> PeerMessageSender<NetworkMessage> {
+    pub fn new(p2p: P2PControlSender<NetworkMessage>, db: SharedDB) -> PeerMessageSender<NetworkMessage> {
         let (sender, receiver) = mpsc::sync_channel(p2p.back_pressure);
-        let mut txsender = SendTx { p2p, db };
 
-        thread::Builder::new().name("sendtx".to_string()).spawn(move || { txsender.send(receiver) }).unwrap();
+        let mut own_unconfirmed = HashMap::new();
+        {
+            let mut db = db.lock().unwrap();
+            let tx = db.transaction();
+            for t in tx.read_unconfirmed().expect("can not read unconfirmed transactions") {
+                own_unconfirmed.insert(t.txid(), t);
+            }
+        }
+
+        let mut txsender = SendTx { p2p, db, cache: LruCache::new(CACHE_SIZE), own_unconfirmed };
+
+        thread::Builder::new().name("sendtx".to_string()).spawn(move || { txsender.run(receiver) }).unwrap();
 
         PeerMessageSender::new(sender)
     }
 
-    fn send(&mut self, receiver:  PeerMessageReceiver<NetworkMessage>) {
+    fn run(&mut self, receiver: PeerMessageReceiver<NetworkMessage>) {
+        let mut last_announcement = SystemTime::now();
         while let Ok(msg) = receiver.recv() {
             match msg {
-                PeerMessage::Message(pid, msg) => {
+                PeerMessage::Incoming(pid, msg) => {
                     match msg {
                         NetworkMessage::GetData(ref inv) => {
-                            let txs = inv.iter().filter_map(|i| if i.inv_type == InvType::Transaction {Some(i.hash)} else {None}).collect::<Vec<_>>();
+                            let txs = inv.iter().filter_map(|i| if i.inv_type == InvType::Transaction { Some(i.hash) } else { None }).collect::<Vec<_>>();
                             if !txs.is_empty() {
-                                let mut db = self.db.lock().unwrap();
-                                let tx = db.transaction();
-                                let unconfirmed = tx.read_unconfirmed().expect("can not read unconfirmed transactions");
-                                for transaction in unconfirmed.iter().filter(|t| txs.contains(&t.txid())) {
-                                    self.p2p.send_network(pid, NetworkMessage::Tx(transaction.clone()));
-                                    debug!("sent our transaction {} at request of peer={}", transaction.txid(), pid);
+                                let txs = txs.iter().filter_map(|h| {
+                                    if let Some(cached) = self.cache.get_mut(h) {
+                                        debug!("send cached tx {} to peer={}", h, pid);
+                                        self.p2p.send_network(pid, NetworkMessage::Tx(cached.clone()));
+                                        None
+                                    } else {
+                                        Some(*h)
+                                    }
+                                }).collect::<Vec<_>>();
+
+                                if !txs.is_empty() {
+                                    for transaction in self.own_unconfirmed.values().filter(|t| txs.contains(&t.txid())) {
+                                        self.p2p.send_network(pid, NetworkMessage::Tx(transaction.clone()));
+                                        debug!("sent our transaction {} at request of peer={}", transaction.txid(), pid);
+                                    }
                                 }
                             }
                         }
+                        NetworkMessage::Inv(ref inv) => {
+                            let have_not = inv.iter().filter(|i| i.inv_type == InvType::Transaction && !self.cache.contains_key(&i.hash)).cloned().collect::<Vec<_>>();
+                            if !have_not.is_empty() {
+                                for t in &have_not {
+                                    debug!("ask for tx {} peer={}", t.hash, pid);
+                                }
+                                self.p2p.send_network(pid, NetworkMessage::GetData(have_not));
+                            }
+                        }
+                        NetworkMessage::Tx(ref tx) => {
+                            if self.cache.insert(tx.txid(), tx.clone()).is_none() {
+                                debug!("send inv of cached tx {} to random peer", tx.txid());
+                                self.p2p.send_random_network(NetworkMessage::Inv(vec!(Inventory { inv_type: InvType::Transaction, hash: tx.txid() })));
+                            }
+                        }
+                        NetworkMessage::Block(ref block) => {
+                            for tx in &block.txdata {
+                                self.own_unconfirmed.remove(&tx.txid());
+                            }
+                        }
+                        _ => {}
+                    }
+                },
+                PeerMessage::Outgoing(msg) => {
+                    match msg {
+                        NetworkMessage::Tx(ref transaction) => {
+                            let mut db = self.db.lock().unwrap();
+                            let mut tx = db.transaction();
+                            tx.store_txout(&transaction).expect("can not store outgoing transaction");
+                            tx.commit();
+                            let txid = transaction.txid();
+                            self.p2p.send_random_network(NetworkMessage::Inv(vec!(Inventory { hash: txid, inv_type: InvType::Transaction })));
+                            self.own_unconfirmed.insert(txid, transaction.clone());
+                        },
                         _ => {}
                     }
                 }
                 _ => {}
             }
-        }
-    }
-
-    fn run(&mut self, receiver: mpsc::Receiver<NetworkMessage>) {
-        loop {
-            while let Ok(msg) = receiver.recv_timeout(Duration::from_secs(60)) {
-                match msg {
-                    NetworkMessage::Tx(transaction) => {
-                        let mut db = self.db.lock().unwrap();
-                        let mut tx = db.transaction();
-                        tx.store_txout(&transaction).expect("can not store outgoing transaction");
-                        tx.commit();
-                    },
-                    _ => {}
+            if SystemTime::now().duration_since(last_announcement).unwrap().as_secs() > 60 {
+                for transaction in self.own_unconfirmed.values() {
+                    if !self.cache.contains_key(&transaction.txid()) {
+                        if let Some(peer) = self.p2p.send_random_network(NetworkMessage::Inv(vec!(Inventory { hash: transaction.txid(), inv_type: InvType::Transaction }))) {
+                            debug!("announced our transaction {} to peer={}", transaction.txid(), peer);
+                        }
+                    }
                 }
-            }
-            let mut db = self.db.lock().unwrap();
-            let tx = db.transaction();
-            for transaction in tx.read_unconfirmed().expect("can not read txout db") {
-                if let Some(peer) = self.p2p.send_random_network(NetworkMessage::Inv(vec!(Inventory{hash: transaction.txid(), inv_type: InvType::Transaction}))) {
-                    debug!("announced our transaction {} to peer={}", transaction.txid(), peer);
-                }
+                last_announcement = SystemTime::now();
             }
         }
     }

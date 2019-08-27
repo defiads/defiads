@@ -67,7 +67,7 @@ impl Updater {
                     PeerMessage::Disconnected(pid,_) => {
                         self.poll_asked.remove(&pid);
                     }
-                    PeerMessage::Message(pid, msg) => {
+                    PeerMessage::Incoming(pid, msg) => {
                         match msg {
                             Message::PollContent(poll) => {
                                 if let Some(question) = self.poll_asked.remove(&pid) {
@@ -176,7 +176,8 @@ impl Updater {
                             }
                             _ => {  }
                         }
-                    }
+                    },
+                    _ => {}
                 }
             }
             self.timeout.lock().unwrap().check(vec!(ExpectedReply::PollContent, ExpectedReply::ContentIBLT, ExpectedReply::Content, ExpectedReply::Get));

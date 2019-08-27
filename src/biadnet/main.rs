@@ -49,6 +49,7 @@ use log_panics;
 use biadne::find_peers::BIADNET_PORT;
 use bitcoin::util::bip32::ExtendedPubKey;
 use bitcoin_wallet::account::{MasterAccount};
+use bitcoin::BitcoinHash;
 
 const HTTP_RPC: &str = "127.0.0.1";
 const BIADNET_LISTEN: &str = "0.0.0.0"; // this also implies ipv6 [::]
@@ -159,6 +160,10 @@ pub fn main () {
             .possible_values(&["ON", "OFF"])
             .case_insensitive(true)
             .default_value("ON"))
+        .arg(Arg::with_name("rescan")
+            .long("rescan")
+            .help("Re-scan blockchain, forget unconfirmed transactions")
+            .takes_value(false))
         .get_matches();
 
     let bitcoin_network = matches.value_of("bitcoin-network").unwrap().parse::<Network>().unwrap();
@@ -241,7 +246,7 @@ pub fn main () {
     let mut config_path = workdir.clone();
     config_path.push(matches.value_of("config").unwrap());
 
-    let bitcoin_wallet;
+    let mut bitcoin_wallet;
     let config;
     if let Ok(config_string) = fs::read_to_string( config_path.clone()) {
         config = toml::from_str::<Config>(config_string.as_str()).expect("can not parse config file");
@@ -282,13 +287,33 @@ pub fn main () {
         }
         fs::write(config_path, toml::to_string(&config).unwrap()).expect("can not write config file");
     };
-    info!("Wallet balance: {} satoshis {} unconfirmed", bitcoin_wallet.balance(), bitcoin_wallet.unconfirmed_balance());
+
 
     let mut chaindb = ChainDB::new(db_path.as_path(), bitcoin_network, 0).expect("can not open chain db");
     chaindb.init(false).expect("can not initialize db");
     let chaindb = Arc::new(RwLock::new(chaindb));
 
     let db = Arc::new(Mutex::new(db));
+
+    if matches.is_present("rescan") {
+        let chaindb = chaindb.read().unwrap();
+        let mut after = None;
+        for t in chaindb.iter_trunk_rev(None) {
+            if (t.stored.header.time as u64) < config.birth {
+                after = Some(t.bitcoin_hash());
+                break;
+            }
+        }
+        if let Some(after) = after {
+            info!("Re-scanning after block {}", &after);
+            let mut db = db.lock().unwrap();
+            let mut tx = db.transaction();
+            tx.rescan(&after).expect("can not re-scan");
+            tx.commit();
+            bitcoin_wallet.rescan();
+        }
+    }
+    info!("Wallet balance: {} satoshis {} unconfirmed", bitcoin_wallet.balance(), bitcoin_wallet.unconfirmed_balance());
 
     let content_store =
         Arc::new(RwLock::new(
