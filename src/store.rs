@@ -85,6 +85,10 @@ impl ContentStore {
         self.txout = Some(txout);
     }
 
+    pub fn balance(&self) -> Vec<u64> {
+        vec!(self.wallet.balance(), self.wallet.confirmed_balance())
+    }
+
     pub fn deposit_address(&mut self) -> Address {
         self.wallet.master.get_mut((0,0)).expect("can not find 0/0 account")
             .next_key().expect("can not generate receiver address in 0/0").address.clone()
@@ -96,7 +100,7 @@ impl ContentStore {
         if let Some(ref txout) = self.txout {
             txout.send(PeerMessage::Outgoing(NetworkMessage::Tx(tx)));
         }
-        info!("Wallet balance: {} satoshis {} unconfirmed", self.wallet.balance(), self.wallet.unconfirmed_balance());
+        info!("Wallet balance: {} satoshis {} confirmed", self.wallet.balance(), self.wallet.confirmed_balance());
         Ok(txid)
     }
 
@@ -127,7 +131,7 @@ impl ContentStore {
         let mut tx = db.transaction();
         if self.wallet.process(block) {
             tx.store_coins(&self.wallet.coins())?;
-            info!("New wallet balance {} satoshis {} unconfirmed", self.wallet.balance(), self.wallet.unconfirmed_balance());
+            info!("New wallet balance {} satoshis {} confirmed", self.wallet.balance(), self.wallet.confirmed_balance());
         }
         tx.store_processed(&block.header.bitcoin_hash())?;
         tx.commit();

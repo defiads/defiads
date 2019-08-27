@@ -313,7 +313,7 @@ pub fn main () {
             bitcoin_wallet.rescan();
         }
     }
-    info!("Wallet balance: {} satoshis {} unconfirmed", bitcoin_wallet.balance(), bitcoin_wallet.unconfirmed_balance());
+    info!("Wallet balance: {} satoshis {} confirmed", bitcoin_wallet.balance(), bitcoin_wallet.confirmed_balance());
 
     let content_store =
         Arc::new(RwLock::new(

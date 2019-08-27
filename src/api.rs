@@ -117,6 +117,16 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore, apikey: S
         };
     });
 
+    // get balance
+    // METHOD: balance
+    // {"jsonrpc":"2.0","result":[balance, confirmed],"id":1}
+    let moved_store = store.clone();
+    let moved_apikey = apikey.clone();
+    io.add_method("balance", move |p:Params| {
+        parse_arguments(p,moved_apikey.as_str())?;
+        Ok(serde_json::to_value(moved_store.read().unwrap().balance()).unwrap())
+    });
+
     // get deposit address
     // METHOD: deposit
     // {"jsonrpc":"2.0","result":"address","id":1}
