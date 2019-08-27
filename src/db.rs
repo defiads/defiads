@@ -48,6 +48,7 @@ use bitcoin_wallet::proved::ProvedTransaction;
 use siphasher::sip::SipHasher;
 use byteorder::LittleEndian;
 use bitcoin::consensus::{serialize, deserialize};
+use crate::ad::Ad;
 
 
 pub type SharedDB = Arc<Mutex<DB>>;
@@ -122,6 +123,14 @@ impl<'db> TX<'db> {
                 length number
             ) without rowid;
 
+            create table if not exists publication (
+                id text primary key,
+                cat text,
+                abs text,
+                ad blob,
+                length number
+            ) without rowid;
+
             create table if not exists account (
                 account_number,
                 sub number,
@@ -154,6 +163,16 @@ impl<'db> TX<'db> {
                 confirmed text
             ) without rowid;
         "#).expect("failed to create db tables");
+    }
+
+    pub fn prepare_publication(&mut self, a: &Ad)  -> Result<sha256::Hash, BiadNetError> {
+        let id = a.digest();
+        let length = a.serialize().len() as u32;
+        self.tx.execute (r#"
+            insert or replace into publication (id, cat, abs, ad, length)
+            values (?1, ?2, ?3, ?4, ?5)
+        "#, &[&id.to_string() as &ToSql, &a.cat, &a.abs, &a.content.as_bytes(), &length])?;
+        Ok(id)
     }
 
     pub fn rescan(&mut self, after: &sha256d::Hash) -> Result<(), BiadNetError> {
@@ -818,6 +837,8 @@ mod test {
             assert_eq!(tx.read_seed().unwrap(), tx.read_seed().unwrap());
             tx.store_txout(&block.txdata[0]).unwrap();
             tx.rescan(&block.header.bitcoin_hash()).unwrap();
+            let ad = Ad::new("cat".to_string(), "abs".to_string(), "content");
+            tx.prepare_publication(&ad).unwrap();
             tx.commit();
         }
     }

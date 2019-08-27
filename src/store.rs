@@ -34,6 +34,7 @@ use crate::trunk::Trunk;
 use crate::wallet::Wallet;
 use bitcoin::network::message::NetworkMessage;
 use murmel::p2p::{PeerMessageSender, PeerMessage};
+use crate::ad::Ad;
 
 const MIN_SKETCH_SIZE: usize = 20;
 
@@ -92,6 +93,14 @@ impl ContentStore {
     pub fn deposit_address(&mut self) -> Address {
         self.wallet.master.get_mut((0,0)).expect("can not find 0/0 account")
             .next_key().expect("can not generate receiver address in 0/0").address.clone()
+    }
+
+    pub fn prepare_publication(&mut self, cat: String, abs: String, content: String) -> sha256::Hash {
+        let mut db = self.db.lock().unwrap();
+        let mut tx = db.transaction();
+        let id = tx.prepare_publication(&Ad::new(cat, abs, content.as_str())).expect("can not store publication");
+        tx.commit();
+        id
     }
 
     pub fn withdraw (&mut self, passpharse: String, address: Address, fee_per_vbyte: u64, amount: Option<u64>) -> Result<sha256d::Hash, BiadNetError> {

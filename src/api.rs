@@ -137,6 +137,20 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore, apikey: S
         Ok(serde_json::to_value(moved_store.write().unwrap().deposit_address().to_string()).unwrap())
     });
 
+    // prepare publication
+    // METHOD: prepare
+    // ARGUMENTS: category, abstract, content
+    // {"jsonrpc":"2.0","result":"address","id":1}
+    let moved_store = store.clone();
+    let moved_apikey = apikey.clone();
+    io.add_method("prepare", move |p:Params| {
+        let args = parse_arguments(p,moved_apikey.as_str())?;
+        if args.len () < 3 {
+            return Err(Error::invalid_params("expect: category, abstract, content"));
+        }
+        Ok(serde_json::to_value(moved_store.write().unwrap().prepare_publication(args[0].clone(), args[1].clone(), args[2].clone())).unwrap())
+    });
+
     // withdraw
     // METHOD: withdraw
     // ARGUMENTS: target_address, fee_per_byte, [amount]

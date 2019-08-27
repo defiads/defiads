@@ -67,7 +67,6 @@ impl SendTx {
                             if !txs.is_empty() {
                                 let txs = txs.iter().filter_map(|h| {
                                     if let Some(cached) = self.cache.get_mut(h) {
-                                        debug!("send cached tx {} to peer={}", h, pid);
                                         self.p2p.send_network(pid, NetworkMessage::Tx(cached.clone()));
                                         None
                                     } else {
@@ -86,15 +85,11 @@ impl SendTx {
                         NetworkMessage::Inv(ref inv) => {
                             let have_not = inv.iter().filter(|i| i.inv_type == InvType::Transaction && !self.cache.contains_key(&i.hash)).cloned().collect::<Vec<_>>();
                             if !have_not.is_empty() {
-                                for t in &have_not {
-                                    debug!("ask for tx {} peer={}", t.hash, pid);
-                                }
                                 self.p2p.send_network(pid, NetworkMessage::GetData(have_not));
                             }
                         }
                         NetworkMessage::Tx(ref tx) => {
                             if self.cache.insert(tx.txid(), tx.clone()).is_none() {
-                                debug!("send inv of cached tx {} to random peer", tx.txid());
                                 self.p2p.send_random_network(NetworkMessage::Inv(vec!(Inventory { inv_type: InvType::Transaction, hash: tx.txid() })));
                             }
                         }
