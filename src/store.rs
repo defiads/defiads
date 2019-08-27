@@ -95,6 +95,18 @@ impl ContentStore {
             .next_key().expect("can not generate receiver address in 0/0").address.clone()
     }
 
+    pub fn read_prepared(&self, id: &sha256::Hash) -> Option<Ad> {
+        let mut db = self.db.lock().unwrap();
+        let tx = db.transaction();
+        tx.read_publication(id).expect("can not list publications")
+    }
+
+    pub fn list_prepared(&self) -> Vec<sha256::Hash> {
+        let mut db = self.db.lock().unwrap();
+        let tx = db.transaction();
+        tx.list_publication().expect("can not list publications")
+    }
+
     pub fn prepare_publication(&mut self, cat: String, abs: String, content: String) -> sha256::Hash {
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();

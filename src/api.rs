@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use crate::store::SharedContentStore;
 use bitcoin::{Address};
+use bitcoin_hashes::sha256;
 
 fn parse_arguments (p: Params, api_key: &str) -> Result<Vec<String>, Error> {
     let mut result = Vec::new();
@@ -149,6 +150,38 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore, apikey: S
             return Err(Error::invalid_params("expect: category, abstract, content"));
         }
         Ok(serde_json::to_value(moved_store.write().unwrap().prepare_publication(args[0].clone(), args[1].clone(), args[2].clone())).unwrap())
+    });
+
+    // list prepared publications
+    // METHOD: list_prepared
+    // {"jsonrpc":"2.0","result":"address","id":1}
+    let moved_store = store.clone();
+    let moved_apikey = apikey.clone();
+    io.add_method("list_prepared", move |p:Params| {
+        parse_arguments(p,moved_apikey.as_str())?;
+        Ok(serde_json::to_value(moved_store.read().unwrap().list_prepared().iter().map(|h| h.to_string()).collect::<Vec<String>>()).unwrap())
+    });
+
+    // read a prepared publication
+    // METHOD: read_prepared
+    // {"jsonrpc":"2.0","result":"category", "abstract", "text","id":1}
+    let moved_store = store.clone();
+    let moved_apikey = apikey.clone();
+    io.add_method("read_prepared", move |p:Params| {
+        let args = parse_arguments(p,moved_apikey.as_str())?;
+        if args.len () < 1 {
+            return Err(Error::invalid_params("expect: prepared publication id"));
+        }
+        let id = sha256::Hash::from_str(args[0].as_str());
+        if id.is_err() {
+            return Err(Error::invalid_params("expect: prepared publication id"));
+        }
+        if let Some(ad) = moved_store.read().unwrap().read_prepared(&id.unwrap()) {
+            Ok(serde_json::to_value(vec!(ad.cat, ad.abs, ad.content.as_string().unwrap())).unwrap())
+        }
+        else {
+            return Err(Error::invalid_params("unkonwn publication"));
+        }
     });
 
     // withdraw

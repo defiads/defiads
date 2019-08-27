@@ -36,7 +36,6 @@ use crate::iblt::IBLT;
 use crate::content::ContentKey;
 use crate::iblt::min_sketch;
 use rand_distr::Poisson;
-use crate::text::Text;
 use bitcoin::{PublicKey, OutPoint, TxOut, Script};
 use std::time::UNIX_EPOCH;
 use crate::discovery::NetAddress;
@@ -113,7 +112,7 @@ impl<'db> TX<'db> {
                 id text primary key,
                 cat text,
                 abs text,
-                ad blob,
+                ad text,
                 block_id text,
                 height number,
                 proof blob,
@@ -127,7 +126,7 @@ impl<'db> TX<'db> {
                 id text primary key,
                 cat text,
                 abs text,
-                ad blob,
+                ad text,
                 length number
             ) without rowid;
 
@@ -165,13 +164,39 @@ impl<'db> TX<'db> {
         "#).expect("failed to create db tables");
     }
 
+    pub fn read_publication(&self, id: &sha256::Hash) -> Result<Option<Ad>, BiadNetError> {
+        Ok(self.tx.query_row(r#"
+            select cat, abs, ad from publication where id = ?1
+        "#, &[&id.to_string() as &ToSql], |r| {
+            Ok(Ad::new(
+                r.get_unwrap::<usize, String>(0),
+                r.get_unwrap::<usize, String>(1),
+                r.get_unwrap::<usize, String>(2).as_str()
+            ))
+        }).optional()?)
+    }
+
+    pub fn list_publication (&self) -> Result<Vec<sha256::Hash>, BiadNetError> {
+        let mut result = Vec::new();
+        // remove unconfirmed spend
+        let mut query = self.tx.prepare(r#"
+            select id from publication
+        "#)?;
+        for r in query.query_map(NO_PARAMS, |r| {
+            Ok(r.get_unwrap::<usize, String>(0))
+        })? {
+            result.push(sha256::Hash::from_str(r?.as_str()).expect("can not deserialize stored publication id"));
+        }
+        Ok(result)
+    }
+
     pub fn prepare_publication(&mut self, a: &Ad)  -> Result<sha256::Hash, BiadNetError> {
         let id = a.digest();
         let length = a.serialize().len() as u32;
         self.tx.execute (r#"
             insert or replace into publication (id, cat, abs, ad, length)
             values (?1, ?2, ?3, ?4, ?5)
-        "#, &[&id.to_string() as &ToSql, &a.cat, &a.abs, &a.content.as_bytes(), &length])?;
+        "#, &[&id.to_string() as &ToSql, &a.cat, &a.abs, &a.content.as_string().expect("can not decompress ad content"), &length])?;
         Ok(id)
     }
 
@@ -428,7 +453,6 @@ impl<'db> TX<'db> {
 
     pub fn store_content(&mut self, height: u32, block_id: &sha256d::Hash, c: &Content, amount: u64) -> Result<usize, BiadNetError> {
         let id = c.ad.digest();
-        let ser_ad = c.ad.serialize();
         let proof = serde_cbor::ser::to_vec(&c.funding).unwrap();
         let publisher = serde_cbor::ser::to_vec(&c.funder).unwrap();
         let length = c.length();
@@ -437,7 +461,7 @@ impl<'db> TX<'db> {
             insert or replace into content (id, cat, abs, ad, block_id, height, proof, publisher, term, weight, length)
             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
         "#, &[&id.to_hex() as &ToSql,
-            &c.ad.cat, &c.ad.abs, &ser_ad,
+            &c.ad.cat, &c.ad.abs, &c.ad.content.as_string().expect("can not decompress ad content"),
             &block_id.to_hex(), &height, &proof, &publisher, &c.term,
             &((amount / length as u64) as u32), &length]
         )?)
@@ -445,14 +469,14 @@ impl<'db> TX<'db> {
 
     pub fn read_content(&self, digest: &sha256::Hash) -> Result<Option<Content>, BiadNetError> {
         Ok(self.tx.query_row(r#"
-            select (ad, proof, publisher, term)
+            select (cat, abs, ad, proof, publisher, term)
             from content where id = ?1
         "#, &[digest.to_hex()], |r| Ok(
             Some(Content {
-                ad: serde_cbor::from_reader(std::io::Cursor::new(r.get_unwrap::<usize, Vec<u8>>(0))).unwrap(),
-                funding: serde_cbor::from_reader(std::io::Cursor::new(r.get_unwrap::<usize, Vec<u8>>(1))).unwrap(),
-                funder: serde_cbor::from_reader(std::io::Cursor::new(r.get_unwrap::<usize, Vec<u8>>(2))).unwrap(),
-                term: r.get_unwrap(3)
+                ad: Ad::new(r.get_unwrap::<usize, String>(0), r.get_unwrap::<usize, String>(1), r.get_unwrap::<usize, String>(2).as_str()),
+                funding: serde_cbor::from_reader(std::io::Cursor::new(r.get_unwrap::<usize, Vec<u8>>(3))).unwrap(),
+                funder: serde_cbor::from_reader(std::io::Cursor::new(r.get_unwrap::<usize, Vec<u8>>(4))).unwrap(),
+                term: r.get_unwrap(5)
             })
         ))?)
     }
@@ -715,7 +739,7 @@ impl<'db> TX<'db> {
                 id: r.get_unwrap::<usize, String>(0),
                 cat: r.get_unwrap::<usize, String>(1),
                 abs: r.get_unwrap::<usize, String>(2),
-                text: Text::from_encoded(r.get_unwrap::<usize, Vec<u8>>(3).as_slice()).as_string().unwrap(),
+                text: r.get_unwrap::<usize, String>(3),
                 publisher: PublicKey::from_slice(r.get_unwrap::<usize, Vec<u8>>(4).as_slice()).unwrap().to_string(),
                 height: r.get_unwrap::<usize, u32>(5),
                 term: r.get_unwrap::<usize, u16>(6),
@@ -839,6 +863,8 @@ mod test {
             tx.rescan(&block.header.bitcoin_hash()).unwrap();
             let ad = Ad::new("cat".to_string(), "abs".to_string(), "content");
             tx.prepare_publication(&ad).unwrap();
+            assert_eq!(tx.read_publication(&ad.digest()).unwrap().unwrap(), ad);
+            assert_eq!(tx.list_publication().unwrap()[0], ad.digest());
             tx.commit();
         }
     }
