@@ -48,6 +48,8 @@ use siphasher::sip::SipHasher;
 use byteorder::LittleEndian;
 use bitcoin::consensus::{serialize, deserialize};
 use crate::ad::Ad;
+use rusqlite::types::ValueRef;
+use rusqlite::types::Null;
 
 
 pub type SharedDB = Arc<Mutex<DB>>;
@@ -148,6 +150,7 @@ impl<'db> TX<'db> {
                 sub number,
                 kix number,
                 tweak text,
+                csv number,
                 proof blob,
                 primary key(txid, vout)
             ) without rowid;
@@ -272,22 +275,29 @@ impl<'db> TX<'db> {
             delete from coins;
         "#, NO_PARAMS)?;
         let mut statement = self.tx.prepare(r#"
-            insert into coins (txid, vout, value, script, account, sub, kix, tweak, proof)
-            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            insert into coins (txid, vout, value, script, account, sub, kix, tweak, csv, proof)
+            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
         "#)?;
         let proofs = coins.proofs();
         for (outpoint, coin) in coins.confirmed() {
-            let tweak = if let Some(ref tweak) = coin.derivation.tweak {
-                    hex::encode(tweak)
-                }
-                else {
-                    String::new()
-                };
             let proof = proofs.get(&outpoint.txid).expect("inconsistent wallet, missing proof");
+            let tweak = if let Some(ref tweak) = coin.derivation.tweak { hex::encode(tweak) } else {"".to_string()};
+
             statement.execute(&[
                 &outpoint.txid.to_string() as &ToSql, &outpoint.vout,
                 &(coin.output.value as i64), &coin.output.script_pubkey.to_bytes(),
-                &coin.derivation.account, &coin.derivation.sub, &coin.derivation.kix, &tweak,
+                &coin.derivation.account, &coin.derivation.sub, &coin.derivation.kix,
+                if tweak == "" {
+                    &Null
+                } else {
+                    &tweak as &ToSql
+                },
+                if let Some(ref csv) = coin.derivation.csv {
+                    csv as &ToSql
+                }
+                else {
+                    &Null
+                },
                 &serde_cbor::ser::to_vec(&proof).expect("can not serialize proof")
             ])?;
         }
@@ -306,7 +316,7 @@ impl<'db> TX<'db> {
     pub fn read_coins(&mut self, master_account:  &mut MasterAccount) -> Result<Coins, BiadNetError> {
         // read confirmed
         let mut query = self.tx.prepare(r#"
-            select txid, vout, value, script, account, sub, kix, tweak, proof from coins
+            select txid, vout, value, script, account, sub, kix, tweak, csv, proof from coins
         "#)?;
         let mut coins = Coins::new();
         for r in query.query_map::<(OutPoint, Coin, ProvedTransaction),&[&ToSql],_> (NO_PARAMS, |r| {
@@ -320,18 +330,19 @@ impl<'db> TX<'db> {
                         account: r.get_unwrap::<usize, u32> (4),
                         sub: r.get_unwrap::<usize, u32> (5),
                         kix: r.get_unwrap::<usize, u32> (6),
-                        tweak: {
-                            let tweak = r.get_unwrap::<usize, String>(7);
-                            if tweak.len() == 0 {
-                                None
-                            }
-                            else {
-                                Some(hex::decode(tweak).expect("tweak not hex"))
-                            }
+                        tweak: match r.get_raw(7) {
+                            ValueRef::Null => None,
+                            ValueRef::Text(tweak) => Some(hex::decode(tweak).expect("tweak not hex")),
+                            _ => panic!("unexpected tweak type")
+                        },
+                        csv: match r.get_raw(8) {
+                            ValueRef::Null => None,
+                            ValueRef::Integer(i) => Some(i as u16),
+                            _ => panic!("unexpected csv type")
                         }
                     }
                 },
-                serde_cbor::from_slice(r.get_unwrap::<usize, Vec<u8>>(8).as_slice()).expect("can not deserialize stored proof")
+                serde_cbor::from_slice(r.get_unwrap::<usize, Vec<u8>>(9).as_slice()).expect("can not deserialize stored proof")
                 ))
         })? {
             let (point, coin, proof) = r?;
@@ -829,7 +840,8 @@ mod test {
                         tweak: None,
                         account: 1,
                         sub: 2,
-                        kix: 3
+                        kix: 3,
+                        csv: None
                     }
                 },
                 ProvedTransaction::new(&genesis, 0));

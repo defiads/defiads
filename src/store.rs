@@ -87,7 +87,7 @@ impl ContentStore {
     }
 
     pub fn balance(&self) -> Vec<u64> {
-        vec!(self.wallet.balance(), self.wallet.confirmed_balance())
+        vec!(self.wallet.balance(), self.wallet.available_balance(self.trunk.len(), |h| self.trunk.get_height(h)))
     }
 
     pub fn deposit_address(&mut self) -> Address {
@@ -116,12 +116,12 @@ impl ContentStore {
     }
 
     pub fn withdraw (&mut self, passpharse: String, address: Address, fee_per_vbyte: u64, amount: Option<u64>) -> Result<sha256d::Hash, BiadNetError> {
-        let tx = self.wallet.withdraw(passpharse, address, fee_per_vbyte, amount)?;
+        let tx = self.wallet.withdraw(passpharse, address, fee_per_vbyte, amount, self.trunk.clone())?;
         let txid = tx.txid();
         if let Some(ref txout) = self.txout {
             txout.send(PeerMessage::Outgoing(NetworkMessage::Tx(tx)));
         }
-        info!("Wallet balance: {} satoshis {} confirmed", self.wallet.balance(), self.wallet.confirmed_balance());
+        info!("Wallet balance: {} satoshis {} available", self.wallet.balance(), self.wallet.available_balance(self.trunk.len(), |h| self.trunk.get_height(h)));
         Ok(txid)
     }
 
@@ -152,7 +152,7 @@ impl ContentStore {
         let mut tx = db.transaction();
         if self.wallet.process(block) {
             tx.store_coins(&self.wallet.coins())?;
-            info!("New wallet balance {} satoshis {} confirmed", self.wallet.balance(), self.wallet.confirmed_balance());
+            info!("New wallet balance {} satoshis {} available", self.wallet.balance(), self.wallet.available_balance(self.trunk.len(), |h| self.trunk.get_height(h)));
         }
         tx.store_processed(&block.header.bitcoin_hash())?;
         tx.commit();

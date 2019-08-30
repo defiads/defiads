@@ -23,12 +23,15 @@ use bitcoin_wallet::coins::{Coins};
 use crate::error::BiadNetError;
 use rand::{RngCore, thread_rng};
 use bitcoin::consensus::serialize;
+use crate::trunk::Trunk;
+use std::sync::Arc;
 
 pub const KEY_LOOK_AHEAD: u32 = 10;
 const KEY_PURPOSE: u32 = 0xb1ad;
 const DUST :u64 = 546;
 const MAX_FEE_PER_VBYTE: u64 = 100;
 const MIN_FEE_PER_VBYTE: u64 = 1;
+const RBF:u32 = 0xffffffff - 2;
 
 pub struct Wallet {
     coins: Coins,
@@ -64,6 +67,11 @@ impl Wallet {
         self.coins.unconfirmed_balance()
     }
 
+    pub fn available_balance<H>(&self, height: u32, height_for_block: H) -> u64
+        where H: Fn(&sha256d::Hash) -> Option<u32> {
+        self.coins.available_balance(height, height_for_block)
+    }
+
     pub fn unwind_tip(&mut self, block_hash: &sha256d::Hash) {
         self.coins.unwind_tip(block_hash)
     }
@@ -80,7 +88,7 @@ impl Wallet {
         self.coins.proofs().get(txid)
     }
 
-    pub fn withdraw (&mut self, passpharse: String, address: Address, mut fee_per_vbyte: u64, amount: Option<u64>) -> Result<Transaction, BiadNetError> {
+    pub fn withdraw (&mut self, passpharse: String, address: Address, mut fee_per_vbyte: u64, amount: Option<u64>, trunk: Arc<dyn Trunk>) -> Result<Transaction, BiadNetError> {
         let network = self.master.master_public().network;
         let mut unlocker = Unlocker::new(
             self.master.encrypted(), passpharse.as_str(), None,
@@ -90,17 +98,20 @@ impl Wallet {
         fee_per_vbyte = std::cmp::min(MAX_FEE_PER_VBYTE, std::cmp::max(MIN_FEE_PER_VBYTE, fee_per_vbyte));
         let mut fee = 0;
         let change_address = self.master.get_mut((0,1)).unwrap().next_key().unwrap().address.clone();
-        let coins = self.coins.get_confirmed_coins(amount);
-        let total_input = coins.iter().map(|(_,c)|c.output.value).sum::<u64>();
+        let height = trunk.len();
+        let coins = self.coins.get_confirmed_coins(amount, height, |h| trunk.get_height(h));
+        let total_input = coins.iter().map(|(_,c,_)|c.output.value).sum::<u64>();
         if amount > total_input {
             return Err(BiadNetError::Unsupported("insufficient funds"));
         }
         let mut tx = Transaction {
-            input: coins.iter().map(|(point, _)|
+            input: coins.iter().map(|(point, coin, h)|
                 TxIn {
                     previous_output: point.clone(),
                     script_sig: Script::new(),
-                    sequence: 0xffffffff,
+                    sequence: if let Some(csv) = coin.derivation.csv {
+                        std::cmp::min(csv as u32, height - *h)
+                    }else{RBF},
                     witness: vec![]
                 }).collect(),
             output: Vec::new(),
@@ -125,14 +136,14 @@ impl Wallet {
                 });
             }
             self.master.sign(&mut tx, SigHashType::All, &|point| {
-                coins.iter().find(|(o, _)| *o == *point).map(|(_, c)| c.output.clone())
+                coins.iter().find(|(o, _, _)| *o == *point).map(|(_, c,_)| c.output.clone())
             }, &mut unlocker)?;
             if fee == 0 {
                 fee = (tx.get_weight() as u64 * fee_per_vbyte + 3)/4;
             }
             else {
                 let txs = serialize(&tx);
-                for (idx, (_, coin)) in coins.iter().enumerate() {
+                for (idx, (_, coin,_)) in coins.iter().enumerate() {
                     coin.output.script_pubkey.verify(idx, coin.output.value, txs.as_slice())?;
                 }
                 if tx.output.len() > 1 {
@@ -151,13 +162,11 @@ impl Wallet {
     pub fn from_storage(coins: Coins, mut master: MasterAccount) -> Wallet {
         for (_, coin) in coins.confirmed() {
             let ref d = coin.derivation;
-            let seen = d.kix;
-            master.get_mut((d.account, d.sub)).unwrap().do_look_ahead(seen).expect("can not look ahead of storage");
+            master.get_mut((d.account, d.sub)).unwrap().do_look_ahead(Some(d.kix)).expect("can not look ahead of storage");
         }
         for (_, coin) in coins.unconfirmed() {
             let ref d = coin.derivation;
-            let seen = d.kix;
-            master.get_mut((d.account, d.sub)).unwrap().do_look_ahead(seen).expect("can not look ahead of storage");
+            master.get_mut((d.account, d.sub)).unwrap().do_look_ahead(Some(d.kix)).expect("can not look ahead of storage");
         }
         Wallet { coins: coins, master }
     }

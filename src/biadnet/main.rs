@@ -50,6 +50,7 @@ use biadne::find_peers::BIADNET_PORT;
 use bitcoin::util::bip32::ExtendedPubKey;
 use bitcoin_wallet::account::{MasterAccount};
 use bitcoin::BitcoinHash;
+use biadne::trunk::Trunk;
 
 const HTTP_RPC: &str = "127.0.0.1";
 const BIADNET_LISTEN: &str = "0.0.0.0"; // this also implies ipv6 [::]
@@ -313,12 +314,14 @@ pub fn main () {
             bitcoin_wallet.rescan();
         }
     }
-    info!("Wallet balance: {} satoshis {} confirmed", bitcoin_wallet.balance(), bitcoin_wallet.confirmed_balance());
+
+    let trunk = Arc::new(ChainDBTrunk { chaindb: chaindb.clone() });
+    info!("Wallet balance: {} satoshis {} available", bitcoin_wallet.balance(), bitcoin_wallet.available_balance(trunk.len(), |h| trunk.get_height(h)));
 
     let content_store =
         Arc::new(RwLock::new(
             ContentStore::new(db.clone(), storage_limit,
-                              Arc::new(ChainDBTrunk{chaindb: chaindb.clone()}),
+                              trunk,
                               bitcoin_wallet)
             .expect("can not initialize content store")));
 

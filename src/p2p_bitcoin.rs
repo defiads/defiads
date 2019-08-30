@@ -203,10 +203,6 @@ impl Future for KeepConnected {
     type Error = Never;
 
     fn poll(&mut self, cx: &mut task::Context) -> Poll<Self::Item, Self::Error> {
-        {
-            let mut waker = self.waker.lock().unwrap();
-            *waker = Some(cx.waker().clone());
-        }
         // find a finished peers
         let finished = self.connections.iter_mut().enumerate().filter_map(|(i, (_, c))| {
             match c.poll(cx) {
@@ -239,6 +235,10 @@ impl Future for KeepConnected {
                     break;
                 }
             }
+        }
+        {
+            let mut waker = self.waker.lock().unwrap();
+            *waker = Some(cx.waker().clone());
         }
         return Ok(Async::Pending);
     }
