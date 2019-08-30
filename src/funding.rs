@@ -27,17 +27,15 @@ use crate::bitcoin::{
 };
 
 use crate::bitcoin_hashes::sha256;
-use crate::secp256k1::{Secp256k1, All};
-use crate::byteorder::{LittleEndian, ByteOrder};
+use bitcoin_wallet::context::SecpContext;
+use std::sync::Arc;
 
-pub fn funding_script (funder: &PublicKey, digest: &sha256::Hash, term: u16, ctx: &Secp256k1<All>) -> Script {
+pub fn funding_script (funder: &PublicKey, digest: &sha256::Hash, term: u16, ctx: Arc<SecpContext>) -> Script {
     let mut tweaked = funder.clone();
-    tweaked.key.add_exp_assign(ctx, &digest[..]).unwrap();
-    let mut buf = [0u8; 4];
-    LittleEndian::write_u32(&mut buf, term as u32 | (1 << 22));
+    ctx.tweak_exp_add(&mut tweaked, &digest[..]).unwrap();
 
     let script = Builder::new()
-        .push_slice(&buf[0..3])
+        .push_int(term as i64)
         .push_opcode(all::OP_CSV)
         .push_opcode(all::OP_DROP)
         .push_slice(tweaked.to_bytes().as_slice())

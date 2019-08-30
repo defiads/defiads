@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 use bitcoin::network::constants::Network;
-use bitcoin_hashes::sha256d;
+use bitcoin_hashes::{sha256, sha256d};
 use bitcoin_wallet::account::{MasterAccount, Unlocker, AccountAddressType, Account, MasterKeyEntropy};
 use bitcoin::util::bip32::ExtendedPubKey;
 use bitcoin::{Block, Transaction, Address, TxIn, Script, TxOut, SigHashType};
@@ -25,12 +25,14 @@ use rand::{RngCore, thread_rng};
 use bitcoin::consensus::serialize;
 use crate::trunk::Trunk;
 use std::sync::Arc;
+use crate::funding::funding_script;
 
 pub const KEY_LOOK_AHEAD: u32 = 10;
 const KEY_PURPOSE: u32 = 0xb1ad;
 const DUST :u64 = 546;
 const MAX_FEE_PER_VBYTE: u64 = 100;
 const MIN_FEE_PER_VBYTE: u64 = 1;
+const MAX_TERM:u16 = 6*24*30; // approx. one month.
 const RBF:u32 = 0xffffffff - 2;
 
 pub struct Wallet {
@@ -86,6 +88,86 @@ impl Wallet {
 
     pub fn prove (&self, txid: &sha256d::Hash) -> Option<&ProvedTransaction> {
         self.coins.proofs().get(txid)
+    }
+
+    pub fn fund (&mut self, id: &sha256::Hash, mut term: u16, passpharse: String, mut fee_per_vbyte: u64, amount: u64, trunk: Arc<dyn Trunk>) -> Result<Transaction, BiadNetError> {
+        let network = self.master.master_public().network;
+        let mut unlocker = Unlocker::new(
+            self.master.encrypted(), passpharse.as_str(), None,
+            network, Some(self.master.master_public()))?;
+        fee_per_vbyte = std::cmp::min(MAX_FEE_PER_VBYTE, std::cmp::max(MIN_FEE_PER_VBYTE, fee_per_vbyte));
+        term = std::cmp::min(MAX_TERM, term);
+        let mut fee = 0;
+        let change_address = self.master.get_mut((0,1)).unwrap().next_key().unwrap().address.clone();
+        let height = trunk.len();
+        let coins = self.coins.get_confirmed_coins(amount, height, |h| trunk.get_height(h));
+        let total_input = coins.iter().map(|(_,c,_)|c.output.value).sum::<u64>();
+        let contract_address;
+        let publisher;
+        {
+            let commit_account = self.master.get_mut((1, 0)).unwrap();
+            let next_key = commit_account.next();
+            publisher = commit_account.compute_base_public_key(next_key).expect("can not compute base public key");
+            let script_code = funding_script(&publisher, id, term, unlocker.context());
+            let kix = commit_account.add_script_key(publisher, script_code, Some(&id[..]), Some(term)).expect("can not commit to ad");
+            contract_address = commit_account.get_key(kix).unwrap().address.clone();
+        }
+        if amount > total_input {
+            return Err(BiadNetError::Unsupported("insufficient funds"));
+        }
+        let mut tx = Transaction {
+            input: coins.iter().map(|(point, coin, h)|
+                TxIn {
+                    previous_output: point.clone(),
+                    script_sig: Script::new(),
+                    sequence: if let Some(csv) = coin.derivation.csv {
+                        std::cmp::min(csv as u32, height - *h)
+                    }else{RBF},
+                    witness: vec![]
+                }).collect(),
+            output: Vec::new(),
+            version: 2,
+            lock_time: 0
+        };
+        loop {
+            tx.output.clear();
+            if amount - fee > DUST {
+                tx.output.push(TxOut {
+                    value: amount - fee,
+                    script_pubkey: contract_address.script_pubkey()
+                });
+            }
+            else {
+                return Err(BiadNetError::Unsupported("withdraw amount is less than the fees needed (+DUST limit)"));
+            }
+            if total_input > amount && (total_input - amount) > DUST {
+                tx.output.insert((thread_rng().next_u32() % 2) as usize, TxOut {
+                    value: total_input - amount,
+                    script_pubkey: change_address.script_pubkey()
+                });
+            }
+            self.master.sign(&mut tx, SigHashType::All, &|point| {
+                coins.iter().find(|(o, _, _)| *o == *point).map(|(_, c,_)| c.output.clone())
+            }, &mut unlocker)?;
+            if fee == 0 {
+                fee = (tx.get_weight() as u64 * fee_per_vbyte + 3)/4;
+            }
+            else {
+                let txs = serialize(&tx);
+                for (idx, (_, coin,_)) in coins.iter().enumerate() {
+                    coin.output.script_pubkey.verify(idx, coin.output.value, txs.as_slice())?;
+                }
+                if tx.output.len() > 1 {
+                    debug!("compiled transaction to fund {} change to {}, fee {}", id, change_address, fee);
+                }
+                else {
+                    debug!("compiled transaction to fund {} fee {}", id, fee);
+                }
+                break;
+            }
+        }
+        self.coins.process_unconfirmed_transaction(&mut self.master, &tx);
+        Ok(tx)
     }
 
     pub fn withdraw (&mut self, passpharse: String, address: Address, mut fee_per_vbyte: u64, amount: Option<u64>, trunk: Arc<dyn Trunk>) -> Result<Transaction, BiadNetError> {

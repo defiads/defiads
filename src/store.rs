@@ -18,7 +18,6 @@
 
 use bitcoin::{BlockHeader, BitcoinHash, Block, Address};
 use bitcoin_hashes::{sha256, sha256d};
-use secp256k1::{Secp256k1, All};
 use std::sync::{RwLock, Arc};
 
 use crate::error::BiadNetError;
@@ -35,6 +34,7 @@ use crate::wallet::Wallet;
 use bitcoin::network::message::NetworkMessage;
 use murmel::p2p::{PeerMessageSender, PeerMessage};
 use crate::ad::Ad;
+use bitcoin_wallet::context::SecpContext;
 
 const MIN_SKETCH_SIZE: usize = 20;
 
@@ -42,7 +42,7 @@ pub type SharedContentStore = Arc<RwLock<ContentStore>>;
 
 /// the distributed content storage
 pub struct ContentStore {
-    ctx: Secp256k1<All>,
+    ctx: Arc<SecpContext>,
     trunk: Arc<dyn Trunk + Send + Sync>,
     db: SharedDB,
     storage_limit: u64,
@@ -69,7 +69,7 @@ impl ContentStore {
             n_keys = n;
         }
         Ok(ContentStore {
-            ctx: Secp256k1::new(),
+            ctx: Arc::new(SecpContext::new()),
             trunk,
             db,
             storage_limit,
@@ -245,7 +245,7 @@ impl ContentStore {
                         if t.version as u32 >= 2 {
                             let digest = content.ad.digest();
                             // expected commitment script to this ad
-                            let commitment = funding_script(&content.funder, &digest, content.term, &self.ctx);
+                            let commitment = funding_script(&content.funder, &digest, content.term, self.ctx.clone());
                             if let Some((_, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
                                 // ok there is a commitment to this ad
                                 info!("add content {}", &digest);
