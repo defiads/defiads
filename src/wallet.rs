@@ -17,7 +17,7 @@ use bitcoin::network::constants::Network;
 use bitcoin_hashes::{sha256, sha256d};
 use bitcoin_wallet::account::{MasterAccount, Unlocker, AccountAddressType, Account, MasterKeyEntropy};
 use bitcoin::util::bip32::ExtendedPubKey;
-use bitcoin::{Block, Transaction, Address, TxIn, Script, TxOut, SigHashType};
+use bitcoin::{Block, Transaction, Address, TxIn, Script, TxOut, SigHashType, PublicKey};
 use bitcoin_wallet::proved::ProvedTransaction;
 use bitcoin_wallet::coins::{Coins};
 use crate::error::BiadNetError;
@@ -90,7 +90,7 @@ impl Wallet {
         self.coins.proofs().get(txid)
     }
 
-    pub fn fund (&mut self, id: &sha256::Hash, mut term: u16, passpharse: String, mut fee_per_vbyte: u64, amount: u64, trunk: Arc<dyn Trunk>) -> Result<Transaction, BiadNetError> {
+    pub fn fund (&mut self, id: &sha256::Hash, mut term: u16, passpharse: String, mut fee_per_vbyte: u64, amount: u64, trunk: Arc<dyn Trunk>) -> Result<(Transaction, PublicKey), BiadNetError> {
         let network = self.master.master_public().network;
         let mut unlocker = Unlocker::new(
             self.master.encrypted(), passpharse.as_str(), None,
@@ -103,13 +103,13 @@ impl Wallet {
         let coins = self.coins.get_confirmed_coins(amount, height, |h| trunk.get_height(h));
         let total_input = coins.iter().map(|(_,c,_)|c.output.value).sum::<u64>();
         let contract_address;
-        let publisher;
+        let funder;
         {
             let commit_account = self.master.get_mut((1, 0)).unwrap();
             let next_key = commit_account.next();
-            publisher = commit_account.compute_base_public_key(next_key).expect("can not compute base public key");
-            let script_code = funding_script(&publisher, id, term, unlocker.context());
-            let kix = commit_account.add_script_key(publisher, script_code, Some(&id[..]), Some(term)).expect("can not commit to ad");
+            funder = commit_account.compute_base_public_key(next_key).expect("can not compute base public key");
+            let script_code = funding_script(&funder, id, term, unlocker.context());
+            let kix = commit_account.add_script_key(funder, script_code, Some(&id[..]), Some(term)).expect("can not commit to ad");
             contract_address = commit_account.get_key(kix).unwrap().address.clone();
         }
         if amount > total_input {
@@ -167,7 +167,7 @@ impl Wallet {
             }
         }
         self.coins.process_unconfirmed_transaction(&mut self.master, &tx);
-        Ok(tx)
+        Ok((tx, funder))
     }
 
     pub fn withdraw (&mut self, passpharse: String, address: Address, mut fee_per_vbyte: u64, amount: Option<u64>, trunk: Arc<dyn Trunk>) -> Result<Transaction, BiadNetError> {

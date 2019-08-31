@@ -162,7 +162,10 @@ impl<'db> TX<'db> {
             create table if not exists txout (
                 txid text primary key,
                 tx blob,
-                confirmed text
+                confirmed text,
+                publisher blob,
+                id text,
+                term number
             ) without rowid;
         "#).expect("failed to create db tables");
     }
@@ -216,24 +219,57 @@ impl<'db> TX<'db> {
         Ok(())
     }
 
-    pub fn store_txout (&mut self, tx: &bitcoin::Transaction) -> Result<(), BiadNetError> {
-        self.tx.execute(r#"
+    pub fn store_txout (&mut self, tx: &bitcoin::Transaction, funding: Option<(&PublicKey, &sha256::Hash, u16)>) -> Result<(), BiadNetError> {
+        if let Some((publisher, id, term)) = funding {
+            self.tx.execute(r#"
+            insert or replace into txout (txid, tx, publisher, id, term) values (?1, ?2, ?3, ?4, ?5)
+        "#, &[&tx.txid().to_string() as &ToSql,
+                &serialize(tx),
+                &publisher.to_bytes(), &id.to_string(), &term])?;
+        }
+        else {
+            self.tx.execute(r#"
             insert or replace into txout (txid, tx) values (?1, ?2)
         "#, &[&tx.txid().to_string() as &ToSql,
-            &serialize(tx)])?;
+                &serialize(tx)])?;
+        }
         Ok(())
     }
 
-    pub fn read_unconfirmed (&self) -> Result<Vec<bitcoin::Transaction>, BiadNetError> {
+    pub fn read_unconfirmed (&self) -> Result<Vec<(bitcoin::Transaction, Option<(PublicKey, sha256::Hash, u16)>)>, BiadNetError> {
         let mut result = Vec::new();
         // remove unconfirmed spend
         let mut query = self.tx.prepare(r#"
-            select tx from txout where confirmed is null
+            select tx, publisher, id, term from txout where confirmed is null
         "#)?;
         for r in query.query_map(NO_PARAMS, |r| {
-            Ok(r.get_unwrap::<usize, Vec<u8>>(0))
+            Ok((r.get_unwrap::<usize, Vec<u8>>(0),
+                match r.get_raw(1) {
+                    ValueRef::Null => None,
+                    ValueRef::Blob(publisher) => Some(publisher.to_vec()),
+                    _ => panic!("unexpected tweak type")
+                },
+                match r.get_raw(2) {
+                    ValueRef::Null => None,
+                    ValueRef::Text(id) => Some(id.to_vec()),
+                    _ => panic!("unexpected tweak type")
+                },
+                match r.get_raw(3) {
+                    ValueRef::Null => None,
+                    ValueRef::Integer(n) => Some(n as u16),
+                    _ => panic!("unexpected tweak type")
+                }))
         })? {
-            result.push(deserialize::<bitcoin::Transaction>(r?.as_slice()).expect("can not deserialize stored transaction"));
+            let (tx, publisher, id, term) = r?;
+            result.push(
+                (deserialize::<bitcoin::Transaction>(tx.as_slice()).expect("can not deserialize stored transaction"),
+                    if let Some(publisher) = publisher {
+                        Some((PublicKey::from_slice(publisher.as_slice()).expect("stored publisher in txout not a pubkey"),
+                        sha256::Hash::from_hex(std::str::from_utf8(id.unwrap().as_slice()).unwrap()).expect("stored id in txout not hex"),
+                        term.unwrap()))
+                    }
+                    else { None },
+                ));
         }
         Ok(result)
     }
@@ -302,7 +338,7 @@ impl<'db> TX<'db> {
             ])?;
         }
 
-        for unconfirmed in self.read_unconfirmed()? {
+        for (unconfirmed, _) in self.read_unconfirmed()? {
             if let Some(proof) = proofs.values().find(|p| p.get_transaction().txid() == unconfirmed.txid()) {
                 self.tx.execute (r#"
                     update txout set confirmed = ?1 where txid = ?2
@@ -871,7 +907,7 @@ mod test {
             tx.store_processed(&block.bitcoin_hash()).unwrap();
             assert_eq!(tx.read_processed().unwrap().unwrap(), block.bitcoin_hash());
             assert_eq!(tx.read_seed().unwrap(), tx.read_seed().unwrap());
-            tx.store_txout(&block.txdata[0]).unwrap();
+            tx.store_txout(&block.txdata[0], None).unwrap();
             tx.rescan(&block.header.bitcoin_hash()).unwrap();
             let ad = Ad::new("cat".to_string(), "abs".to_string(), "content");
             tx.prepare_publication(&ad).unwrap();

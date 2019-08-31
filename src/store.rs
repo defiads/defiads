@@ -17,7 +17,7 @@
 //! store
 
 use bitcoin::{BlockHeader, BitcoinHash, Block, Address};
-use bitcoin_hashes::{sha256, sha256d};
+use bitcoin_hashes::{sha256, sha256d, Hash};
 use std::sync::{RwLock, Arc};
 
 use crate::error::BiadNetError;
@@ -35,6 +35,7 @@ use bitcoin::network::message::NetworkMessage;
 use murmel::p2p::{PeerMessageSender, PeerMessage};
 use crate::ad::Ad;
 use bitcoin_wallet::context::SecpContext;
+use bitcoin_wallet::proved::ProvedTransaction;
 
 const MIN_SKETCH_SIZE: usize = 20;
 
@@ -115,11 +116,29 @@ impl ContentStore {
         id
     }
 
-    pub fn withdraw (&mut self, passpharse: String, address: Address, fee_per_vbyte: u64, amount: Option<u64>) -> Result<sha256d::Hash, BiadNetError> {
-        let tx = self.wallet.withdraw(passpharse, address, fee_per_vbyte, amount, self.trunk.clone())?;
-        let txid = tx.txid();
+    pub fn fund (&mut self, id: &sha256::Hash, term: u16, amount: u64, fee_per_vbyte: u64, passpharse: String) -> Result<sha256d::Hash, BiadNetError> {
+        let (transaction, funder) = self.wallet.fund(id, term, passpharse, fee_per_vbyte, amount, self.trunk.clone())?;
+        let txid = transaction.txid();
+        let mut db = self.db.lock().unwrap();
+        let mut tx = db.transaction();
+        tx.store_txout(&transaction, Some((&funder, id, term))).expect("can not store outgoing transaction");
+        tx.commit();
         if let Some(ref txout) = self.txout {
-            txout.send(PeerMessage::Outgoing(NetworkMessage::Tx(tx)));
+            txout.send(PeerMessage::Outgoing(NetworkMessage::Tx(transaction)));
+        }
+        info!("Wallet balance: {} satoshis {} available", self.wallet.balance(), self.wallet.available_balance(self.trunk.len(), |h| self.trunk.get_height(h)));
+        Ok(txid)
+    }
+
+    pub fn withdraw (&mut self, passpharse: String, address: Address, fee_per_vbyte: u64, amount: Option<u64>) -> Result<sha256d::Hash, BiadNetError> {
+        let transaction = self.wallet.withdraw(passpharse, address, fee_per_vbyte, amount, self.trunk.clone())?;
+        let txid = transaction.txid();
+        let mut db = self.db.lock().unwrap();
+        let mut tx = db.transaction();
+        tx.store_txout(&transaction, None).expect("can not store outgoing transaction");
+        tx.commit();
+        if let Some(ref txout) = self.txout {
+            txout.send(PeerMessage::Outgoing(NetworkMessage::Tx(transaction)));
         }
         info!("Wallet balance: {} satoshis {} available", self.wallet.balance(), self.wallet.available_balance(self.trunk.len(), |h| self.trunk.get_height(h)));
         Ok(txid)
@@ -148,14 +167,35 @@ impl ContentStore {
 
     pub fn block_connected(&mut self, block: &Block, height: u32) -> Result<(), BiadNetError> {
         debug!("processing block {} {}", height, block.header.bitcoin_hash());
-        let mut db = self.db.lock().unwrap();
-        let mut tx = db.transaction();
-        if self.wallet.process(block) {
-            tx.store_coins(&self.wallet.coins())?;
-            info!("New wallet balance {} satoshis {} available", self.wallet.balance(), self.wallet.available_balance(self.trunk.len(), |h| self.trunk.get_height(h)));
+        let newly_confirmed_publication;
+        {
+            let mut db = self.db.lock().unwrap();
+            let mut tx = db.transaction();
+
+            newly_confirmed_publication = tx.read_unconfirmed()?.iter()
+                .filter_map(|(t, p)|
+                    if let Some((p, id, term)) = p {
+                        if let Some((tix, _)) = block.txdata.iter().enumerate().find(|(_, c)| c.txid() == t.txid()) {
+                            Some((tix, p.clone(), id.clone(), tx.read_publication(id).expect("error reading confirmed publication"), *term))
+                        } else { None }
+                    } else { None }).collect::<Vec<_>>();
+
+            if self.wallet.process(block) {
+                tx.store_coins(&self.wallet.coins())?;
+                info!("New wallet balance {} satoshis {} available", self.wallet.balance(), self.wallet.available_balance(self.trunk.len(), |h| self.trunk.get_height(h)));
+            }
+            tx.store_processed(&block.header.bitcoin_hash())?;
+            tx.commit();
         }
-        tx.store_processed(&block.header.bitcoin_hash())?;
-        tx.commit();
+        for (tix, funder, id, ad, term) in newly_confirmed_publication {
+            if let Some(ad) = ad {
+                let funding = ProvedTransaction::new(block, tix);
+                if self.add_content(&Content { funding, ad, funder, term})? {
+                    info!("confirmed publication {}", id);
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -166,6 +206,7 @@ impl ContentStore {
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         for key in &mut tx.delete_expired(height)? {
+            debug!("delete expired content {}", sha256::Hash::from_slice(&key.digest[..]).unwrap());
             for (_, i) in &mut self.iblts {
                 i.delete(key);
                 deleted_some = true;
@@ -188,6 +229,7 @@ impl ContentStore {
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         for key in &mut tx.delete_confirmed(&header.bitcoin_hash())? {
+            debug!("delete un-confirmed content {}", sha256::Hash::from_slice(&key.digest[..]).unwrap());
             for (_, i) in &mut self.iblts {
                 i.delete(key);
                 deleted_some = true;
@@ -209,6 +251,7 @@ impl ContentStore {
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         for key in &mut tx.truncate_content(self.storage_limit)? {
+            debug!("delete content exceeding memory limit {}", sha256::Hash::from_slice(&key.digest[..]).unwrap());
             for (_, i) in &mut self.iblts {
                 i.delete(key);
                 deleted_some = true;
@@ -241,14 +284,14 @@ impl ContentStore {
                     // check if header's merkle root matches that of the proof
                     if header.merkle_root == content.funding.merkle_root() {
                         let t = content.funding.get_transaction();
-                        // only use version 2 transactions to avoid malleability
+                        // only use version 2 transactions
                         if t.version as u32 >= 2 {
                             let digest = content.ad.digest();
                             // expected commitment script to this ad
                             let commitment = funding_script(&content.funder, &digest, content.term, self.ctx.clone());
                             if let Some((_, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
                                 // ok there is a commitment to this ad
-                                info!("add content {}", &digest);
+                                debug!("add content {}", &digest);
                                 let key = ContentKey::new(&digest[..]);
                                 for (_, i) in &mut self.iblts {
                                     i.insert(&key);

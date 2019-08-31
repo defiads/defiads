@@ -188,7 +188,6 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore, apikey: S
     // METHOD: withdraw
     // ARGUMENTS: target_address, fee_per_byte, [amount]
     // if amount is not specified it withdraws all. Amount is in satoshis, fee is in satoshi/vByte
-    // answer is (ordered by category name and weight descending):
     // {"jsonrpc":"2.0","result":"txid","id":1}
     let moved_store = store.clone();
     let moved_apikey = apikey.clone();
@@ -230,6 +229,74 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore, apikey: S
             }
         }
         match moved_store.write().unwrap().withdraw(passpharse, address, fee_per_vbyte, amount) {
+            Ok(txid) => Ok(serde_json::to_value(txid).unwrap()),
+            Err(e) => Err(Error::invalid_params(e.to_string().as_str()))
+        }
+    });
+
+    // fund
+    // METHOD: fund
+    // ARGUMENTS: publication, amount, term, fee_per_vbyte
+    // {"jsonrpc":"2.0","result":"txid","id":1}
+    let moved_store = store.clone();
+    let moved_apikey = apikey.clone();
+    io.add_method("fund", move |p:Params| {
+        let (passpharse, args) = parse_wallet_arguments(p,moved_apikey.as_str())?;
+        if args.len () < 4 {
+            return Err(Error::invalid_params("missing publication, amount, term and fee per byte"));
+        }
+        let id;
+        if let Value::String(ref s) = args[0] {
+            if let Ok(i) = sha256::Hash::from_str(s.as_str()) {
+                id = i;
+            }
+            else {
+                return Err(Error::invalid_params("malformed publication id"));
+            }
+        }
+        else {
+            return Err(Error::invalid_params("malformed publication id"));
+        }
+        let amount;
+        if let Value::Number(ref n) = args[1] {
+            if let Some(a) = n.as_u64() {
+                amount = a;
+            }
+            else {
+                return Err(Error::invalid_params("malformed amount"));
+            }
+        }
+        else {
+            return Err(Error::invalid_params("malformed amount"));
+        }
+        let term;
+        if let Value::Number(ref n) = args[1] {
+            if let Some(t) = n.as_u64() {
+                term = t as u16;
+            }
+            else {
+                return Err(Error::invalid_params("malformed term"));
+            }
+        }
+        else {
+            return Err(Error::invalid_params("malformed term"));
+        }
+        let fee_per_vbyte;
+        if let Value::Number(ref n) = args[2] {
+            if let Some(sats) = n.as_u64() {
+                fee_per_vbyte = std::cmp::min(sats, 100);
+            }
+            else {
+                debug!("malformed fee");
+                return Err(Error::invalid_params("malformed fee"));
+            }
+        }
+        else {
+            debug!("malformed fee");
+            return Err(Error::invalid_params("malformed fee"));
+        }
+
+        match moved_store.write().unwrap().fund(&id, term, amount, fee_per_vbyte, passpharse) {
             Ok(txid) => Ok(serde_json::to_value(txid).unwrap()),
             Err(e) => Err(Error::invalid_params(e.to_string().as_str()))
         }
