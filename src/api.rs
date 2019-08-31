@@ -270,7 +270,7 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore, apikey: S
             return Err(Error::invalid_params("malformed amount"));
         }
         let term;
-        if let Value::Number(ref n) = args[1] {
+        if let Value::Number(ref n) = args[2] {
             if let Some(t) = n.as_u64() {
                 term = t as u16;
             }
@@ -282,7 +282,7 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore, apikey: S
             return Err(Error::invalid_params("malformed term"));
         }
         let fee_per_vbyte;
-        if let Value::Number(ref n) = args[2] {
+        if let Value::Number(ref n) = args[3] {
             if let Some(sats) = n.as_u64() {
                 fee_per_vbyte = std::cmp::min(sats, 100);
             }

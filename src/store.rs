@@ -16,13 +16,12 @@
 
 //! store
 
-use bitcoin::{BlockHeader, BitcoinHash, Block, Address};
+use bitcoin::{BlockHeader, BitcoinHash, Block, Address, PublicKey, Script};
 use bitcoin_hashes::{sha256, sha256d, Hash};
 use std::sync::{RwLock, Arc};
 
 use crate::error::BiadNetError;
 use crate::content::Content;
-use crate::funding::funding_script;
 use crate::db::{SharedDB, RetrievedContent};
 use crate::iblt::IBLT;
 use crate::content::ContentKey;
@@ -36,6 +35,13 @@ use murmel::p2p::{PeerMessageSender, PeerMessage};
 use crate::ad::Ad;
 use bitcoin_wallet::context::SecpContext;
 use bitcoin_wallet::proved::ProvedTransaction;
+use bitcoin::{
+    network::constants::Network,
+    blockdata::{
+        opcodes::all,
+        script::Builder
+    }
+};
 
 const MIN_SKETCH_SIZE: usize = 20;
 
@@ -117,7 +123,8 @@ impl ContentStore {
     }
 
     pub fn fund (&mut self, id: &sha256::Hash, term: u16, amount: u64, fee_per_vbyte: u64, passpharse: String) -> Result<sha256d::Hash, BiadNetError> {
-        let (transaction, funder) = self.wallet.fund(id, term, passpharse, fee_per_vbyte, amount, self.trunk.clone())?;
+        let (transaction, funder) = self.wallet.fund(id, term, passpharse, fee_per_vbyte, amount, self.trunk.clone(),
+            |pk, term| Self::funding_script(pk, term.unwrap()))?;
         let txid = transaction.txid();
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
@@ -128,6 +135,18 @@ impl ContentStore {
         }
         info!("Wallet balance: {} satoshis {} available", self.wallet.balance(), self.wallet.available_balance(self.trunk.len(), |h| self.trunk.get_height(h)));
         Ok(txid)
+    }
+
+    fn funding_script (tweaked: &PublicKey, term: u16) -> Script {
+        let script = Builder::new()
+            .push_int(term as i64)
+            .push_opcode(all::OP_CSV)
+            .push_opcode(all::OP_DROP)
+            .push_slice(tweaked.to_bytes().as_slice())
+            .push_opcode(all::OP_CHECKSIG)
+            .into_script();
+
+        Address::p2wsh(&script, Network::Bitcoin).script_pubkey()
     }
 
     pub fn withdraw (&mut self, passpharse: String, address: Address, fee_per_vbyte: u64, amount: Option<u64>) -> Result<sha256d::Hash, BiadNetError> {
@@ -288,7 +307,10 @@ impl ContentStore {
                         if t.version as u32 >= 2 {
                             let digest = content.ad.digest();
                             // expected commitment script to this ad
-                            let commitment = funding_script(&content.funder, &digest, content.term, self.ctx.clone());
+                            let mut tweaked = content.funder.clone();
+                            self.ctx.tweak_exp_add(&mut tweaked, &digest[..]).unwrap();
+
+                            let commitment = Self::funding_script(&tweaked, content.term);
                             if let Some((_, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
                                 // ok there is a commitment to this ad
                                 debug!("add content {}", &digest);

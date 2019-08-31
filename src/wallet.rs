@@ -25,7 +25,6 @@ use rand::{RngCore, thread_rng};
 use bitcoin::consensus::serialize;
 use crate::trunk::Trunk;
 use std::sync::Arc;
-use crate::funding::funding_script;
 
 pub const KEY_LOOK_AHEAD: u32 = 10;
 const KEY_PURPOSE: u32 = 0xb1ad;
@@ -90,7 +89,8 @@ impl Wallet {
         self.coins.proofs().get(txid)
     }
 
-    pub fn fund (&mut self, id: &sha256::Hash, mut term: u16, passpharse: String, mut fee_per_vbyte: u64, amount: u64, trunk: Arc<dyn Trunk>) -> Result<(Transaction, PublicKey), BiadNetError> {
+    pub fn fund<W> (&mut self, id: &sha256::Hash, mut term: u16, passpharse: String, mut fee_per_vbyte: u64, amount: u64, trunk: Arc<dyn Trunk>, scripter: W) -> Result<(Transaction, PublicKey), BiadNetError>
+        where W: FnOnce(&PublicKey, Option<u16>) -> Script {
         let network = self.master.master_public().network;
         let mut unlocker = Unlocker::new(
             self.master.encrypted(), passpharse.as_str(), None,
@@ -100,17 +100,15 @@ impl Wallet {
         let mut fee = 0;
         let change_address = self.master.get_mut((0,1)).unwrap().next_key().unwrap().address.clone();
         let height = trunk.len();
-        let coins = self.coins.get_confirmed_coins(amount, height, |h| trunk.get_height(h));
+        let coins = self.coins.choose_inputs(amount, height, |h| trunk.get_height(h));
         let total_input = coins.iter().map(|(_,c,_)|c.output.value).sum::<u64>();
         let contract_address;
         let funder;
         {
             let commit_account = self.master.get_mut((1, 0)).unwrap();
-            let next_key = commit_account.next();
-            funder = commit_account.compute_base_public_key(next_key).expect("can not compute base public key");
-            let script_code = funding_script(&funder, id, term, unlocker.context());
-            let kix = commit_account.add_script_key(funder, script_code, Some(&id[..]), Some(term)).expect("can not commit to ad");
+            let kix = commit_account.add_script_key(scripter, Some(&id[..]), Some(term)).expect("can not commit to ad");
             contract_address = commit_account.get_key(kix).unwrap().address.clone();
+            funder = commit_account.compute_base_public_key(kix).expect("can not compute base public key");
         }
         if amount > total_input {
             return Err(BiadNetError::Unsupported("insufficient funds"));
@@ -146,22 +144,24 @@ impl Wallet {
                     script_pubkey: change_address.script_pubkey()
                 });
             }
-            self.master.sign(&mut tx, SigHashType::All, &|point| {
-                coins.iter().find(|(o, _, _)| *o == *point).map(|(_, c,_)| c.output.clone())
-            }, &mut unlocker)?;
+            if self.master.sign(&mut tx, SigHashType::All,
+                                &|point| {
+                                    coins.iter().find(|(o, _, _)| *o == *point).map(|(_, c, _)| c.output.clone())
+                                }, &mut unlocker)?
+                != tx.input.len () {
+                error!("could not sign all inputs of our transaction {:?} {}", tx, hex::encode(serialize(&tx)));
+                return Err(BiadNetError::Unsupported("could not sign for all inputs"));
+            }
             if fee == 0 {
                 fee = (tx.get_weight() as u64 * fee_per_vbyte + 3)/4;
             }
             else {
-                let txs = serialize(&tx);
-                for (idx, (_, coin,_)) in coins.iter().enumerate() {
-                    coin.output.script_pubkey.verify(idx, coin.output.value, txs.as_slice())?;
-                }
-                if tx.output.len() > 1 {
-                    debug!("compiled transaction to fund {} change to {}, fee {}", id, change_address, fee);
-                }
-                else {
-                    debug!("compiled transaction to fund {} fee {}", id, fee);
+                match tx.verify(|o| coins.iter().find_map(|(p, c, _)| if *p == *o { Some(c.output.clone())} else {None})) {
+                    Ok(()) => debug!("compiled transaction to fund {} fee {}", id, fee),
+                    Err(e) => {
+                        error!("our transaction does not verify {:?} {}", tx, hex::encode(serialize(&tx)));
+                        return Err(BiadNetError::Script(e))
+                    }
                 }
                 break;
             }
@@ -175,13 +175,13 @@ impl Wallet {
         let mut unlocker = Unlocker::new(
             self.master.encrypted(), passpharse.as_str(), None,
             network, Some(self.master.master_public()))?;
-        let balance = self.confirmed_balance();
+        let height = trunk.len();
+        let balance = self.available_balance(height, |h| trunk.get_height(h));
         let amount = amount.unwrap_or(balance);
         fee_per_vbyte = std::cmp::min(MAX_FEE_PER_VBYTE, std::cmp::max(MIN_FEE_PER_VBYTE, fee_per_vbyte));
         let mut fee = 0;
         let change_address = self.master.get_mut((0,1)).unwrap().next_key().unwrap().address.clone();
-        let height = trunk.len();
-        let coins = self.coins.get_confirmed_coins(amount, height, |h| trunk.get_height(h));
+        let coins = self.coins.choose_inputs(amount, height, |h| trunk.get_height(h));
         let total_input = coins.iter().map(|(_,c,_)|c.output.value).sum::<u64>();
         if amount > total_input {
             return Err(BiadNetError::Unsupported("insufficient funds"));
@@ -217,22 +217,24 @@ impl Wallet {
                     script_pubkey: change_address.script_pubkey()
                 });
             }
-            self.master.sign(&mut tx, SigHashType::All, &|point| {
-                coins.iter().find(|(o, _, _)| *o == *point).map(|(_, c,_)| c.output.clone())
-            }, &mut unlocker)?;
+            if self.master.sign(&mut tx, SigHashType::All,
+                                &|point| {
+                                    coins.iter().find(|(o, _, _)| *o == *point).map(|(_, c, _)| c.output.clone())
+                                }, &mut unlocker)?
+                != tx.input.len () {
+                error!("could not sign all inputs of our transaction {:?} {}", tx, hex::encode(serialize(&tx)));
+                return Err(BiadNetError::Unsupported("could not sign for all inputs"));
+            }
             if fee == 0 {
                 fee = (tx.get_weight() as u64 * fee_per_vbyte + 3)/4;
             }
             else {
-                let txs = serialize(&tx);
-                for (idx, (_, coin,_)) in coins.iter().enumerate() {
-                    coin.output.script_pubkey.verify(idx, coin.output.value, txs.as_slice())?;
-                }
-                if tx.output.len() > 1 {
-                    debug!("compiled transaction to withdraw {} to {}, change to {}, fee {}", amount - fee, address, change_address, fee);
-                }
-                else {
-                    debug!("compiled transaction to withdraw {} to {}, fee {}", amount - fee, address, fee);
+                match tx.verify(|o| coins.iter().find_map(|(p, c, _)| if *p == *o { Some(c.output.clone())} else {None})) {
+                    Ok(()) => debug!("compiled transaction to withdraw {} fee {}", amount, fee),
+                    Err(e) => {
+                        error!("our transaction does not verify {:?} {}", tx, hex::encode(serialize(&tx)));
+                        return Err(BiadNetError::Script(e))
+                    }
                 }
                 break;
             }
