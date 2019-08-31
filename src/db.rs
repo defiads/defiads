@@ -133,12 +133,12 @@ impl<'db> TX<'db> {
             ) without rowid;
 
             create table if not exists account (
-                account_number,
+                account number,
                 sub number,
                 address_type number,
                 master text,
                 instantiated blob,
-                primary key(account_number, sub)
+                primary key(account, sub)
             ) without rowid;
 
             create table if not exists coins (
@@ -413,7 +413,7 @@ impl<'db> TX<'db> {
     pub fn store_account(&mut self, account: &Account) -> Result<usize, BiadNetError> {
         debug!("store account {}/{}", account.account_number(), account.sub_account_number());
         Ok(self.tx.execute(r#"
-            insert or replace into account (account_number, address_type, sub, master, instantiated)
+            insert or replace into account (account, address_type, sub, master, instantiated)
             values (?1, ?2, ?3, ?4, ?5)
         "#, &[&account.account_number() as &ToSql,
             &account.address_type().as_u32(), &account.sub_account_number(), &account.master_public().to_string(),
@@ -424,7 +424,7 @@ impl<'db> TX<'db> {
     pub fn read_account(&mut self, account_number: u32, sub: u32, network: Network, look_ahead: u32) -> Result<Account, BiadNetError> {
         debug!("read account {}/{}", account_number, sub);
         Ok(self.tx.query_row(r#"
-            select address_type, master, instantiated from account where account_number = ?1 and sub = ?2
+            select address_type, master, instantiated from account where account = ?1 and sub = ?2
         "#, &[&account_number as &ToSql, &sub], |r| {
             Ok(Account::new_from_storage(
                 AccountAddressType::from_u32(r.get_unwrap::<usize, u32>(0)),

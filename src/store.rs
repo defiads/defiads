@@ -128,6 +128,7 @@ impl ContentStore {
         let txid = transaction.txid();
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
+        tx.store_account(&self.wallet.master.get((1,0)).unwrap())?;
         tx.store_txout(&transaction, Some((&funder, id, term))).expect("can not store outgoing transaction");
         tx.commit();
         if let Some(ref txout) = self.txout {
@@ -154,6 +155,7 @@ impl ContentStore {
         let txid = transaction.txid();
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
+        tx.store_account(&self.wallet.master.get((0,1)).unwrap())?;
         tx.store_txout(&transaction, None).expect("can not store outgoing transaction");
         tx.commit();
         if let Some(ref txout) = self.txout {
