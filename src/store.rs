@@ -122,10 +122,9 @@ impl ContentStore {
         id
     }
 
-    pub fn fund (&mut self, id: &sha256::Hash, term: u16, amount: u64, fee_per_vbyte: u64, passpharse: String) -> Result<(sha256d::Hash, Transaction, PublicKey, u64), BiadNetError> {
+    pub fn fund (&mut self, id: &sha256::Hash, term: u16, amount: u64, fee_per_vbyte: u64, passpharse: String) -> Result<(Transaction, PublicKey, u64), BiadNetError> {
         let (transaction, funder,fee) = self.wallet.fund(id, term, passpharse, fee_per_vbyte, amount, self.trunk.clone(),
             |pk, term| Self::funding_script(pk, term.unwrap()))?;
-        let txid = transaction.txid();
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         tx.store_account(&self.wallet.master.get((1,0)).unwrap())?;
@@ -135,7 +134,7 @@ impl ContentStore {
             txout.send(PeerMessage::Outgoing(NetworkMessage::Tx(transaction.clone())));
         }
         info!("Wallet balance: {} satoshis {} available", self.wallet.balance(), self.wallet.available_balance(self.trunk.len(), |h| self.trunk.get_height(h)));
-        Ok((txid, transaction, funder, fee))
+        Ok((transaction, funder, fee))
     }
 
     pub fn funding_script(tweaked: &PublicKey, term: u16) -> Script {
@@ -152,19 +151,18 @@ impl ContentStore {
         Address::p2wsh(&Self::funding_script(tweaked, term), Network::Bitcoin)
     }
 
-    pub fn withdraw (&mut self, passpharse: String, address: Address, fee_per_vbyte: u64, amount: Option<u64>) -> Result<sha256d::Hash, BiadNetError> {
-        let (transaction, _) = self.wallet.withdraw(passpharse, address, fee_per_vbyte, amount, self.trunk.clone())?;
-        let txid = transaction.txid();
+    pub fn withdraw (&mut self, passpharse: String, address: Address, fee_per_vbyte: u64, amount: Option<u64>) -> Result<(Transaction, u64), BiadNetError> {
+        let (transaction, fee) = self.wallet.withdraw(passpharse, address, fee_per_vbyte, amount, self.trunk.clone())?;
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         tx.store_account(&self.wallet.master.get((0,1)).unwrap())?;
         tx.store_txout(&transaction, None).expect("can not store outgoing transaction");
         tx.commit();
         if let Some(ref txout) = self.txout {
-            txout.send(PeerMessage::Outgoing(NetworkMessage::Tx(transaction)));
+            txout.send(PeerMessage::Outgoing(NetworkMessage::Tx(transaction.clone())));
         }
         info!("Wallet balance: {} satoshis {} available", self.wallet.balance(), self.wallet.available_balance(self.trunk.len(), |h| self.trunk.get_height(h)));
-        Ok(txid)
+        Ok((transaction, fee))
     }
 
     pub fn get_nkeys (&self) -> u32 {
@@ -404,7 +402,7 @@ mod test {
     use super::ContentStore;
     use crate::db::DB;
     use crate::wallet::Wallet;
-    use bitcoin::{network::constants::Network, blockdata::opcodes::all, BlockHeader, Block, BitcoinHash, util::bip32::ExtendedPubKey, Address, Transaction, TxIn, OutPoint, TxOut, PublicKey};
+    use bitcoin::{network::constants::Network, blockdata::opcodes::all, BlockHeader, Block, BitcoinHash, util::bip32::ExtendedPubKey, Address, Transaction, TxIn, OutPoint, TxOut};
     use std::{
         sync::{Arc, Mutex},
         str::FromStr
@@ -544,7 +542,7 @@ mod test {
         assert_eq!(store.balance(), vec!(NEW_COINS, NEW_COINS));
 
         let burn = Address::p2shwsh(&Builder::new().push_opcode(all::OP_VERIFY).into_script(), Network::Testnet);
-        let (burn_half, fee) = store.wallet.withdraw(PASSPHRASE.to_string(), burn, 1, Some(NEW_COINS/2), trunk.clone()).unwrap();
+        let (burn_half, _) = store.withdraw(PASSPHRASE.to_string(), burn, 1, Some(NEW_COINS/2)).unwrap();
 
         let mut next = mine(&store, 2, &miner);
         add_tx(&mut next, burn_half);
@@ -554,14 +552,13 @@ mod test {
         assert_eq!(store.balance(), vec!(NEW_COINS + NEW_COINS/2, NEW_COINS + NEW_COINS/2));
 
         let id = store.prepare_publication("/foo/what".to_string(), "index.html".to_string(), "<head></head>".to_string());
-        let (_, fundit, _, _) = store.fund(&id, 1, NEW_COINS,5, PASSPHRASE.to_string()).unwrap();
+        let (fundit, _, _) = store.fund(&id, 1, NEW_COINS,5, PASSPHRASE.to_string()).unwrap();
 
         let mut next = mine(&store, 3, &miner);
         add_tx(&mut next, fundit);
         trunk.extend(&next.header);
         store.add_header(3, &next.header).unwrap();
         store.block_connected(&next, 3).unwrap();
-
         assert!(store.list_categories().unwrap().contains(&"/foo/what".to_string ()));
 
         let next = mine(&store, 4, &miner);

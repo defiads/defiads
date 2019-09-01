@@ -458,7 +458,7 @@ mod test {
         wallet.process(&next);
         assert_eq!(wallet.balance(), NEW_COINS + NEW_COINS/2);
 
-        let (fund, pk, fee) = wallet.fund(&sha256::Hash::default(), 1, PASSPHRASE.to_string(), 5, NEW_COINS/10, trunk.clone(),
+        let (fund, _, fee) = wallet.fund(&sha256::Hash::default(), 1, PASSPHRASE.to_string(), 5, NEW_COINS/10, trunk.clone(),
             |pk: &PublicKey, term: Option<u16>| {
                 ContentStore::funding_script(pk, term.unwrap())
             }).unwrap();
