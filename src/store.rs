@@ -200,7 +200,8 @@ impl ContentStore {
                             Some((tix, p.clone(), id.clone(), tx.read_publication(id).expect("error reading confirmed publication"), *term))
                         } else { None }
                     } else { None }).collect::<Vec<_>>();
-            debug!("{} newly confirmed publications", newly_confirmed_publication.len());
+
+            newly_confirmed_publication.iter().for_each(|(_,_,id,_,_)| info!("Our publication {} is confirmed.", id));
 
             if self.wallet.process(block) {
                 tx.store_coins(&self.wallet.coins())?;
@@ -212,7 +213,6 @@ impl ContentStore {
         for (tix, funder, id, ad, term) in newly_confirmed_publication {
             if let Some(ad) = ad {
                 let funding = ProvedTransaction::new(block, tix);
-                debug!("try to add content {}", ad.digest());
                 if self.add_content(&Content { funding, ad, funder, term})? {
                     info!("confirmed publication {}", id);
                 }
