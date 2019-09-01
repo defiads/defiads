@@ -337,6 +337,6 @@ pub fn main () {
     P2PBitcoin::new(bitcoin_network, bitcoin_connections, bitcoin_peers, bitcoin_discovery, chaindb.clone(), db.clone(),
                     content_store.clone(), config.birth).start(&mut thread_pool);
     P2PBiadNet::new(biadnet_connections, biadnet_peers, biadnet_listen, biadnet_discovery, db.clone(),
-                    content_store.clone()).start(&mut thread_pool);
+                    content_store.clone(), bitcoin_network != Network::Bitcoin).start(&mut thread_pool);
     thread_pool.run::<Empty<(), Never>>(future::empty()).unwrap();
 }

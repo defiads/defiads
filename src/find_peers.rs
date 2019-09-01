@@ -21,11 +21,11 @@ pub const BIADNET_PORT: u16 = 21766;
 
 const SEEDER: [&str;1] = ["biad.network"];
 
-pub fn seed () -> Vec<SocketAddr> {
+pub fn seed (test: bool) -> Vec<SocketAddr> {
     let mut seeds = Vec::new ();
     info!("reaching out for biadnet seed...");
     for seedhost in SEEDER.iter() {
-        if let Ok(lookup) = (*seedhost, BIADNET_PORT).to_socket_addrs() {
+        if let Ok(lookup) = (*seedhost, BIADNET_PORT + if test {100} else {0}).to_socket_addrs() {
             for host in lookup {
                 seeds.push(host);
             }

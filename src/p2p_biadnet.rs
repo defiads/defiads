@@ -191,12 +191,13 @@ pub struct P2PBiadNet {
     listen: Vec<SocketAddr>,
     db: SharedDB,
     content_store: SharedContentStore,
-    discovery: bool
+    discovery: bool,
+    test: bool
 }
 
 impl P2PBiadNet {
-    pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>, discovery: bool, db: SharedDB, content_store: SharedContentStore) -> P2PBiadNet {
-        P2PBiadNet {connections, peers, listen, db, content_store, discovery}
+    pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>, discovery: bool, db: SharedDB, content_store: SharedContentStore, test: bool) -> P2PBiadNet {
+        P2PBiadNet {connections, peers, listen, db, content_store, discovery, test}
     }
     pub fn start(&self, thread_pool: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
@@ -239,7 +240,7 @@ impl P2PBiadNet {
         thread_pool.spawn(p2p_task).unwrap();
 
         info!("BiadNet p2p engine started");
-        let keep_connected = Self::keep_connected(p2p.clone(), self.peers.clone(), self.connections, self.discovery, self.db.clone());
+        let keep_connected = Self::keep_connected(p2p.clone(), self.peers.clone(), self.connections, self.discovery, self.db.clone(), self.test);
         let waker = keep_connected.waker.clone();
         thread::Builder::new().name("biadkeep".to_string()).spawn(move ||
             {
@@ -252,7 +253,7 @@ impl P2PBiadNet {
         thread_pool.spawn(Box::new(keep_connected)).unwrap();
     }
 
-    fn keep_connected(p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize, discovery: bool, db: SharedDB) -> KeepConnected {
+    fn keep_connected(p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize, discovery: bool, db: SharedDB, test: bool) -> KeepConnected {
         // add initial peers if any
         let mut connections = Vec::new();
         for addr in &peers {
@@ -260,7 +261,7 @@ impl P2PBiadNet {
         }
 
         return KeepConnected { min_connections, connections, p2p,
-            dns: Vec::new(), earlier: HashSet::new(), db, waker: Arc::new(Mutex::new(None)), discovery, peers };
+            dns: Vec::new(), earlier: HashSet::new(), db, waker: Arc::new(Mutex::new(None)), discovery, peers, test };
     }
 }
 
@@ -274,7 +275,8 @@ struct KeepConnected {
     db: SharedDB,
     waker: Arc<Mutex<Option<Waker>>>,
     discovery: bool,
-    peers: Vec<SocketAddr>
+    peers: Vec<SocketAddr>,
+    test: bool
 }
 
 // this task runs until it runs out of peers
@@ -331,7 +333,7 @@ impl KeepConnected {
             return Some(a);
         }
         if self.dns.len() == 0 {
-            self.dns = seed();
+            self.dns = seed(self.test);
             let mut db = self.db.lock().unwrap();
             let mut tx = db.transaction();
             for a in &self.dns {
