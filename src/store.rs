@@ -200,6 +200,7 @@ impl ContentStore {
                             Some((tix, p.clone(), id.clone(), tx.read_publication(id).expect("error reading confirmed publication"), *term))
                         } else { None }
                     } else { None }).collect::<Vec<_>>();
+            debug!("{} newly confirmed publications", newly_confirmed_publication.len());
 
             if self.wallet.process(block) {
                 tx.store_coins(&self.wallet.coins())?;
@@ -211,6 +212,7 @@ impl ContentStore {
         for (tix, funder, id, ad, term) in newly_confirmed_publication {
             if let Some(ad) = ad {
                 let funding = ProvedTransaction::new(block, tix);
+                debug!("try to add content {}", ad.digest());
                 if self.add_content(&Content { funding, ad, funder, term})? {
                     info!("confirmed publication {}", id);
                 }
@@ -330,10 +332,28 @@ impl ContentStore {
                                 }
                                 return Ok(true)
                             }
+                            else {
+                                debug!("reject content {}: none of the output is a commitment to this content, expecting script_pubkey {}", content.ad.digest(), hex::encode(commitment.to_bytes()));
+                            }
+                        }
+                        else {
+                            debug!("reject content {}: not a version >=2 transaction", content.ad.digest());
                         }
                     }
+                    else {
+                        debug!("reject content {}: SPV proof does not check out", content.ad.digest());
+                    }
+                }
+                else {
+                    debug!("reject content {}: no header for {}", content.ad.digest(), content.funding.get_block_hash());
                 }
             }
+            else {
+                debug!("reject content {}: expired at block {}", content.ad.digest(), height + content.term as u32);
+            }
+        }
+        else {
+            debug!("reject content {}: unkown block {}", content.ad.digest(), content.funding.get_block_hash());
         }
         Ok(false)
     }
