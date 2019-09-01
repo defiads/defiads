@@ -23,7 +23,7 @@ use rusqlite::{Connection, Transaction, ToSql, OptionalExtension};
 use std::net::SocketAddr;
 use std::hash::Hasher;
 use crate::byteorder::ByteOrder;
-use crate::error::BiadNetError;
+use crate::error::Error;
 use std::time::SystemTime;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -67,11 +67,11 @@ pub struct DB {
 }
 
 impl DB {
-    pub fn memory () -> Result<DB, BiadNetError> {
+    pub fn memory () -> Result<DB, Error> {
         Ok(DB{connection: Connection::open_in_memory()?})
     }
 
-    pub fn new(path: &std::path::Path) -> Result<DB, BiadNetError> {
+    pub fn new(path: &std::path::Path) -> Result<DB, Error> {
         Ok(DB{connection: Connection::open(path)?})
     }
 
@@ -170,7 +170,7 @@ impl<'db> TX<'db> {
         "#).expect("failed to create db tables");
     }
 
-    pub fn read_publication(&self, id: &sha256::Hash) -> Result<Option<Ad>, BiadNetError> {
+    pub fn read_publication(&self, id: &sha256::Hash) -> Result<Option<Ad>, Error> {
         Ok(self.tx.query_row(r#"
             select cat, abs, ad from publication where id = ?1
         "#, &[&id.to_string() as &ToSql], |r| {
@@ -182,7 +182,7 @@ impl<'db> TX<'db> {
         }).optional()?)
     }
 
-    pub fn list_publication (&self) -> Result<Vec<sha256::Hash>, BiadNetError> {
+    pub fn list_publication (&self) -> Result<Vec<sha256::Hash>, Error> {
         let mut result = Vec::new();
         // remove unconfirmed spend
         let mut query = self.tx.prepare(r#"
@@ -196,7 +196,7 @@ impl<'db> TX<'db> {
         Ok(result)
     }
 
-    pub fn prepare_publication(&mut self, a: &Ad)  -> Result<sha256::Hash, BiadNetError> {
+    pub fn prepare_publication(&mut self, a: &Ad)  -> Result<sha256::Hash, Error> {
         let id = a.digest();
         let length = a.serialize().len() as u32;
         self.tx.execute (r#"
@@ -206,7 +206,7 @@ impl<'db> TX<'db> {
         Ok(id)
     }
 
-    pub fn rescan(&mut self, after: &sha256d::Hash) -> Result<(), BiadNetError> {
+    pub fn rescan(&mut self, after: &sha256d::Hash) -> Result<(), Error> {
         self.tx.execute(r#"
             update processed set block = ?1
         "#, &[&after.to_string() as &ToSql])?;
@@ -219,7 +219,7 @@ impl<'db> TX<'db> {
         Ok(())
     }
 
-    pub fn store_txout (&mut self, tx: &bitcoin::Transaction, funding: Option<(&PublicKey, &sha256::Hash, u16)>) -> Result<(), BiadNetError> {
+    pub fn store_txout (&mut self, tx: &bitcoin::Transaction, funding: Option<(&PublicKey, &sha256::Hash, u16)>) -> Result<(), Error> {
         if let Some((publisher, id, term)) = funding {
             self.tx.execute(r#"
             insert or replace into txout (txid, tx, publisher, id, term) values (?1, ?2, ?3, ?4, ?5)
@@ -236,7 +236,7 @@ impl<'db> TX<'db> {
         Ok(())
     }
 
-    pub fn read_unconfirmed (&self) -> Result<Vec<(bitcoin::Transaction, Option<(PublicKey, sha256::Hash, u16)>)>, BiadNetError> {
+    pub fn read_unconfirmed (&self) -> Result<Vec<(bitcoin::Transaction, Option<(PublicKey, sha256::Hash, u16)>)>, Error> {
         let mut result = Vec::new();
         // remove unconfirmed spend
         let mut query = self.tx.prepare(r#"
@@ -274,7 +274,7 @@ impl<'db> TX<'db> {
         Ok(result)
     }
 
-    pub fn read_seed(&mut self) -> Result<(u64, u64), BiadNetError> {
+    pub fn read_seed(&mut self) -> Result<(u64, u64), Error> {
         if let Some(seed) = self.tx.query_row(r#"
             select k0, k1 from seed where rowid = 1
         "#,NO_PARAMS, |r| Ok(
@@ -292,21 +292,21 @@ impl<'db> TX<'db> {
         }
     }
 
-    pub fn read_processed(&mut self) -> Result<Option<sha256d::Hash>, BiadNetError> {
+    pub fn read_processed(&mut self) -> Result<Option<sha256d::Hash>, Error> {
         Ok(self.tx.query_row(r#"
             select block from processed where rowid = 1
         "#,NO_PARAMS, |r| Ok(sha256d::Hash::from_hex(r.get_unwrap::<usize, String>(0).as_str())
             .expect("stored block not hex"))).optional()?)
     }
 
-    pub fn store_processed(&mut self, block_id: &sha256d::Hash) -> Result<(), BiadNetError> {
+    pub fn store_processed(&mut self, block_id: &sha256d::Hash) -> Result<(), Error> {
         self.tx.execute(r#"
             insert or replace into processed (rowid, block) values (1, ?1)
         "#, &[&block_id.to_string() as &ToSql])?;
         Ok(())
     }
 
-    pub fn store_coins(&mut self, coins: &Coins) -> Result<(), BiadNetError> {
+    pub fn store_coins(&mut self, coins: &Coins) -> Result<(), Error> {
         self.tx.execute (r#"
             delete from coins;
         "#, NO_PARAMS)?;
@@ -349,7 +349,7 @@ impl<'db> TX<'db> {
         Ok(())
     }
 
-    pub fn read_coins(&mut self, master_account:  &mut MasterAccount) -> Result<Coins, BiadNetError> {
+    pub fn read_coins(&mut self, master_account:  &mut MasterAccount) -> Result<Coins, Error> {
         // read confirmed
         let mut query = self.tx.prepare(r#"
             select txid, vout, value, script, account, sub, kix, tweak, csv, proof from coins
@@ -398,7 +398,7 @@ impl<'db> TX<'db> {
         Ok(coins)
     }
 
-    pub fn store_master(&mut self, master: &MasterAccount) -> Result<usize, BiadNetError> {
+    pub fn store_master(&mut self, master: &MasterAccount) -> Result<usize, Error> {
         debug!("store master account");
         self.tx.execute (r#"
             delete from account;
@@ -410,7 +410,7 @@ impl<'db> TX<'db> {
         Ok(inserted)
     }
 
-    pub fn store_account(&mut self, account: &Account) -> Result<usize, BiadNetError> {
+    pub fn store_account(&mut self, account: &Account) -> Result<usize, Error> {
         debug!("store account {}/{}", account.account_number(), account.sub_account_number());
         Ok(self.tx.execute(r#"
             insert or replace into account (account, address_type, sub, master, instantiated)
@@ -421,7 +421,7 @@ impl<'db> TX<'db> {
         )?)
     }
 
-    pub fn read_account(&mut self, account_number: u32, sub: u32, network: Network, look_ahead: u32) -> Result<Account, BiadNetError> {
+    pub fn read_account(&mut self, account_number: u32, sub: u32, network: Network, look_ahead: u32) -> Result<Account, Error> {
         debug!("read account {}/{}", account_number, sub);
         Ok(self.tx.query_row(r#"
             select address_type, master, instantiated from account where account = ?1 and sub = ?2
@@ -439,7 +439,7 @@ impl<'db> TX<'db> {
         })?)
     }
 
-    pub fn compute_content_iblt(&mut self, len: u32) -> Result<IBLT<ContentKey>, BiadNetError> {
+    pub fn compute_content_iblt(&mut self, len: u32) -> Result<IBLT<ContentKey>, Error> {
         let mut iblt = IBLT::new(len, NH, K0, K1);
 
         let mut query = self.tx.prepare(r#"
@@ -454,7 +454,7 @@ impl<'db> TX<'db> {
         Ok(iblt)
     }
 
-    pub fn compute_content_sketch(&mut self, len: usize) -> Result<(Vec<u64>, Vec<(u64, u64)>, u32), BiadNetError> {
+    pub fn compute_content_sketch(&mut self, len: usize) -> Result<(Vec<u64>, Vec<(u64, u64)>, u32), Error> {
         let mut query = self.tx.prepare(r#"
             select id from content
         "#)?;
@@ -467,7 +467,7 @@ impl<'db> TX<'db> {
     }
 
 
-    pub fn compute_address_iblt(&mut self, len: u32) -> Result<IBLT<NetAddress>, BiadNetError> {
+    pub fn compute_address_iblt(&mut self, len: u32) -> Result<IBLT<NetAddress>, Error> {
         let mut iblt = IBLT::new(len, NH, K0, K1);
 
         let mut query = self.tx.prepare(r#"
@@ -483,7 +483,7 @@ impl<'db> TX<'db> {
         Ok(iblt)
     }
 
-    pub fn compute_address_sketch (&mut self, len: usize) -> Result<(Vec<u64>, u32), BiadNetError> {
+    pub fn compute_address_sketch (&mut self, len: usize) -> Result<(Vec<u64>, u32), Error> {
         let mut query = self.tx.prepare(r#"
             select ip from address where network = ?1 and last_seen > ?2 and banned < ?2
         "#)?;
@@ -498,7 +498,7 @@ impl<'db> TX<'db> {
     }
 
 
-    pub fn store_content(&mut self, height: u32, block_id: &sha256d::Hash, c: &Content, amount: u64) -> Result<usize, BiadNetError> {
+    pub fn store_content(&mut self, height: u32, block_id: &sha256d::Hash, c: &Content, amount: u64) -> Result<usize, Error> {
         let id = c.ad.digest();
         let proof = serde_cbor::ser::to_vec(&c.funding).unwrap();
         let publisher = serde_cbor::ser::to_vec(&c.funder).unwrap();
@@ -514,7 +514,7 @@ impl<'db> TX<'db> {
         )?)
     }
 
-    pub fn read_content(&self, digest: &sha256::Hash) -> Result<Option<Content>, BiadNetError> {
+    pub fn read_content(&self, digest: &sha256::Hash) -> Result<Option<Content>, Error> {
         Ok(self.tx.query_row(r#"
             select (cat, abs, ad, proof, publisher, term)
             from content where id = ?1
@@ -528,7 +528,7 @@ impl<'db> TX<'db> {
         ))?)
     }
 
-    pub fn truncate_content(&mut self, limit: u64) -> Result<Vec<ContentKey>, BiadNetError> {
+    pub fn truncate_content(&mut self, limit: u64) -> Result<Vec<ContentKey>, Error> {
         let mut statement = self.tx.prepare(r#"
             select id, length from content order by weight desc
         "#)?;
@@ -557,7 +557,7 @@ impl<'db> TX<'db> {
         Ok(keys)
     }
 
-    pub fn delete_expired(&mut self, height: u32) -> Result<Vec<ContentKey>, BiadNetError> {
+    pub fn delete_expired(&mut self, height: u32) -> Result<Vec<ContentKey>, Error> {
         let mut keys = Vec::new();
         self.tx.execute(r#"
             create temp table ids (
@@ -599,7 +599,7 @@ impl<'db> TX<'db> {
         Ok(keys)
     }
 
-    pub fn delete_confirmed(&mut self, block_id: &sha256d::Hash) -> Result<Vec<ContentKey>, BiadNetError> {
+    pub fn delete_confirmed(&mut self, block_id: &sha256d::Hash) -> Result<Vec<ContentKey>, Error> {
         let mut keys = Vec::new();
         self.tx.execute(r#"
             create temp table ids (
@@ -641,7 +641,7 @@ impl<'db> TX<'db> {
         Ok(keys)
     }
 
-    pub fn store_address(&mut self, network: &str, address: &SocketAddr, mut connected: u64, mut last_seen: u64, mut banned: u64) -> Result<usize, BiadNetError>  {
+    pub fn store_address(&mut self, network: &str, address: &SocketAddr, mut connected: u64, mut last_seen: u64, mut banned: u64) -> Result<usize, Error>  {
         let (k0, k1) = self.read_seed()?;
         let mut siphasher = SipHasher::new_with_keys(k0, k1);
         siphasher.write(network.as_bytes());
@@ -696,7 +696,7 @@ impl<'db> TX<'db> {
     // get an address not banned during the last day
     // the probability to be selected is exponentially higher for those with higher last_seen time
     // TODO mark tried connections, build slots instead of storing all. Replace only if not tried for long or banned
-    pub fn get_an_address(&self, network: &str, other_than: &HashSet<SocketAddr>) -> Result<Option<SocketAddr>, BiadNetError> {
+    pub fn get_an_address(&self, network: &str, other_than: &HashSet<SocketAddr>) -> Result<Option<SocketAddr>, Error> {
         const BAN_TIME: u64 = 60*60*24; // a day
 
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
@@ -723,7 +723,7 @@ impl<'db> TX<'db> {
                     Poisson::new(len as f64 / 4.0).unwrap()) as usize)]))
     }
 
-    pub fn list_categories(&mut self) -> Result<Vec<String>, BiadNetError> {
+    pub fn list_categories(&mut self) -> Result<Vec<String>, Error> {
         let mut statement = self.tx.prepare(r#"
             select distinct cat from content order by cat
         "#)?;
@@ -736,7 +736,7 @@ impl<'db> TX<'db> {
         Ok(result)
     }
 
-    pub fn list_abstracts(&mut self, cats: Vec<String>) -> Result<Vec<Vec<String>>, BiadNetError> {
+    pub fn list_abstracts(&mut self, cats: Vec<String>) -> Result<Vec<Vec<String>>, Error> {
         // mut &self because using temp table
         self.tx.execute(r#"
             create temp table cats (
@@ -764,7 +764,7 @@ impl<'db> TX<'db> {
         Ok(result)
     }
 
-    pub fn retrieve_contents(&mut self, ids: Vec<String>) -> Result<Vec<RetrievedContent>, BiadNetError> {
+    pub fn retrieve_contents(&mut self, ids: Vec<String>) -> Result<Vec<RetrievedContent>, Error> {
         // mut &self because using temp table
         self.tx.execute(r#"
             create temp table ids (

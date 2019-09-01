@@ -20,7 +20,7 @@ use bitcoin::util::bip32::ExtendedPubKey;
 use bitcoin::{Block, Transaction, Address, TxIn, Script, TxOut, SigHashType, PublicKey};
 use bitcoin_wallet::proved::ProvedTransaction;
 use bitcoin_wallet::coins::{Coins};
-use crate::error::BiadNetError;
+use crate::error::Error;
 use rand::{RngCore, thread_rng};
 use bitcoin::consensus::serialize;
 use crate::trunk::Trunk;
@@ -89,7 +89,7 @@ impl Wallet {
         self.coins.proofs().get(txid)
     }
 
-    pub fn fund<W> (&mut self, id: &sha256::Hash, mut term: u16, passpharse: String, mut fee_per_vbyte: u64, amount: u64, trunk: Arc<dyn Trunk>, scripter: W) -> Result<(Transaction, PublicKey, u64), BiadNetError>
+    pub fn fund<W> (&mut self, id: &sha256::Hash, mut term: u16, passpharse: String, mut fee_per_vbyte: u64, amount: u64, trunk: Arc<dyn Trunk>, scripter: W) -> Result<(Transaction, PublicKey, u64), Error>
         where W: FnOnce(&PublicKey, Option<u16>) -> Script {
         let network = self.master.master_public().network;
         let mut unlocker = Unlocker::new(
@@ -111,7 +111,7 @@ impl Wallet {
             funder = commit_account.compute_base_public_key(kix).expect("can not compute base public key");
         }
         if amount > total_input {
-            return Err(BiadNetError::Unsupported("insufficient funds"));
+            return Err(Error::Unsupported("insufficient funds"));
         }
         let mut tx = Transaction {
             input: coins.iter().map(|(point, coin, h)|
@@ -136,7 +136,7 @@ impl Wallet {
                 });
             }
             else {
-                return Err(BiadNetError::Unsupported("withdraw amount is less than the fees needed (+DUST limit)"));
+                return Err(Error::Unsupported("withdraw amount is less than the fees needed (+DUST limit)"));
             }
             if total_input > amount && (total_input - amount) > DUST {
                 tx.output.insert((thread_rng().next_u32() % 2) as usize, TxOut {
@@ -150,7 +150,7 @@ impl Wallet {
                                 }, &mut unlocker)?
                 != tx.input.len () {
                 error!("could not sign all inputs of our transaction {:?} {}", tx, hex::encode(serialize(&tx)));
-                return Err(BiadNetError::Unsupported("could not sign for all inputs"));
+                return Err(Error::Unsupported("could not sign for all inputs"));
             }
             if fee == 0 {
                 fee = (tx.get_weight() as u64 * fee_per_vbyte + 3)/4;
@@ -160,7 +160,7 @@ impl Wallet {
                     Ok(()) => debug!("compiled transaction to fund {} fee {}", id, fee),
                     Err(e) => {
                         error!("our transaction does not verify {:?} {}", tx, hex::encode(serialize(&tx)));
-                        return Err(BiadNetError::Script(e))
+                        return Err(Error::Script(e))
                     }
                 }
                 break;
@@ -170,7 +170,7 @@ impl Wallet {
         Ok((tx, funder, fee))
     }
 
-    pub fn withdraw (&mut self, passpharse: String, address: Address, mut fee_per_vbyte: u64, amount: Option<u64>, trunk: Arc<dyn Trunk>) -> Result<(Transaction, u64), BiadNetError> {
+    pub fn withdraw (&mut self, passpharse: String, address: Address, mut fee_per_vbyte: u64, amount: Option<u64>, trunk: Arc<dyn Trunk>) -> Result<(Transaction, u64), Error> {
         let network = self.master.master_public().network;
         let mut unlocker = Unlocker::new(
             self.master.encrypted(), passpharse.as_str(), None,
@@ -184,7 +184,7 @@ impl Wallet {
         let coins = self.coins.choose_inputs(amount, height, |h| trunk.get_height(h));
         let total_input = coins.iter().map(|(_,c,_)|c.output.value).sum::<u64>();
         if amount > total_input {
-            return Err(BiadNetError::Unsupported("insufficient funds"));
+            return Err(Error::Unsupported("insufficient funds"));
         }
         let mut tx = Transaction {
             input: coins.iter().map(|(point, coin, h)|
@@ -209,7 +209,7 @@ impl Wallet {
                 });
             }
             else {
-                return Err(BiadNetError::Unsupported("withdraw amount is less than the fees needed (+DUST limit)"));
+                return Err(Error::Unsupported("withdraw amount is less than the fees needed (+DUST limit)"));
             }
             if total_input > amount && (total_input - amount) > DUST {
                 tx.output.insert((thread_rng().next_u32() % 2) as usize, TxOut {
@@ -223,7 +223,7 @@ impl Wallet {
                                 }, &mut unlocker)?
                 != tx.input.len () {
                 error!("could not sign all inputs of our transaction {:?} {}", tx, hex::encode(serialize(&tx)));
-                return Err(BiadNetError::Unsupported("could not sign for all inputs"));
+                return Err(Error::Unsupported("could not sign for all inputs"));
             }
             if fee == 0 {
                 fee = (tx.get_weight() as u64 * fee_per_vbyte + 3)/4;
@@ -233,7 +233,7 @@ impl Wallet {
                     Ok(()) => debug!("compiled transaction to withdraw {} fee {}", amount, fee),
                     Err(e) => {
                         error!("our transaction does not verify {:?} {}", tx, hex::encode(serialize(&tx)));
-                        return Err(BiadNetError::Script(e))
+                        return Err(Error::Script(e))
                     }
                 }
                 break;

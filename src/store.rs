@@ -20,7 +20,7 @@ use bitcoin::{BlockHeader, BitcoinHash, Block, Address, PublicKey, Script, Trans
 use bitcoin_hashes::{sha256, sha256d, Hash};
 use std::sync::{RwLock, Arc};
 
-use crate::error::BiadNetError;
+use crate::error::Error;
 use crate::content::Content;
 use crate::db::{SharedDB, RetrievedContent};
 use crate::iblt::IBLT;
@@ -63,7 +63,7 @@ pub struct ContentStore {
 
 impl ContentStore {
     /// new content store
-    pub fn new(db: SharedDB, storage_limit: u64, trunk: Arc<dyn Trunk + Send + Sync>, wallet: Wallet) -> Result<ContentStore, BiadNetError> {
+    pub fn new(db: SharedDB, storage_limit: u64, trunk: Arc<dyn Trunk + Send + Sync>, wallet: Wallet) -> Result<ContentStore, Error> {
         let mut mins;
         let ksequence;
         let n_keys;
@@ -122,7 +122,7 @@ impl ContentStore {
         id
     }
 
-    pub fn fund (&mut self, id: &sha256::Hash, term: u16, amount: u64, fee_per_vbyte: u64, passpharse: String) -> Result<(Transaction, PublicKey, u64), BiadNetError> {
+    pub fn fund (&mut self, id: &sha256::Hash, term: u16, amount: u64, fee_per_vbyte: u64, passpharse: String) -> Result<(Transaction, PublicKey, u64), Error> {
         let (transaction, funder,fee) = self.wallet.fund(id, term, passpharse, fee_per_vbyte, amount, self.trunk.clone(),
             |pk, term| Self::funding_script(pk, term.unwrap()))?;
         let mut db = self.db.lock().unwrap();
@@ -151,7 +151,7 @@ impl ContentStore {
         Address::p2wsh(&Self::funding_script(tweaked, term), Network::Bitcoin)
     }
 
-    pub fn withdraw (&mut self, passpharse: String, address: Address, fee_per_vbyte: u64, amount: Option<u64>) -> Result<(Transaction, u64), BiadNetError> {
+    pub fn withdraw (&mut self, passpharse: String, address: Address, fee_per_vbyte: u64, amount: Option<u64>) -> Result<(Transaction, u64), Error> {
         let (transaction, fee) = self.wallet.withdraw(passpharse, address, fee_per_vbyte, amount, self.trunk.clone())?;
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
@@ -180,13 +180,13 @@ impl ContentStore {
         None
     }
 
-    pub fn get_iblt(&mut self, size: u32) -> Result<&IBLT<ContentKey>, BiadNetError> {
+    pub fn get_iblt(&mut self, size: u32) -> Result<&IBLT<ContentKey>, Error> {
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         Ok(self.iblts.entry(size).or_insert(tx.compute_content_iblt(size)?))
     }
 
-    pub fn block_connected(&mut self, block: &Block, height: u32) -> Result<(), BiadNetError> {
+    pub fn block_connected(&mut self, block: &Block, height: u32) -> Result<(), Error> {
         debug!("processing block {} {}", height, block.header.bitcoin_hash());
         let newly_confirmed_publication;
         {
@@ -223,7 +223,7 @@ impl ContentStore {
     }
 
     /// add a header to the tip of the chain
-    pub fn add_header(&mut self, height: u32, header: &BlockHeader) -> Result<(), BiadNetError> {
+    pub fn add_header(&mut self, height: u32, header: &BlockHeader) -> Result<(), Error> {
         info!("new chain tip at height {} {}", height, header.bitcoin_hash());
         let mut deleted_some = false;
         let mut db = self.db.lock().unwrap();
@@ -246,7 +246,7 @@ impl ContentStore {
     }
 
     /// unwind the tip
-    pub fn unwind_tip(&mut self, header: &BlockHeader) -> Result<(), BiadNetError> {
+    pub fn unwind_tip(&mut self, header: &BlockHeader) -> Result<(), Error> {
         info!("unwind tip {}", header.bitcoin_hash());
         let mut deleted_some = false;
         let mut db = self.db.lock().unwrap();
@@ -269,7 +269,7 @@ impl ContentStore {
         return Ok(())
     }
 
-    pub fn truncate_to_limit(&mut self) -> Result<(), BiadNetError> {
+    pub fn truncate_to_limit(&mut self) -> Result<(), Error> {
         let mut deleted_some = false;
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
@@ -290,14 +290,14 @@ impl ContentStore {
         return Ok(())
     }
 
-    pub fn get_content(&self, digest: &sha256::Hash) -> Result<Option<Content>, BiadNetError> {
+    pub fn get_content(&self, digest: &sha256::Hash) -> Result<Option<Content>, Error> {
         let mut db = self.db.lock().unwrap();
         let tx = db.transaction();
         Ok(tx.read_content(digest)?)
     }
 
     /// add content
-    pub fn add_content(&mut self, content: &Content) -> Result<bool, BiadNetError> {
+    pub fn add_content(&mut self, content: &Content) -> Result<bool, Error> {
         // is the block on trunk the proof refers to
         if let Some(height) = self.trunk.get_height(content.funding.get_block_hash()) {
             // not yet expired
@@ -358,19 +358,19 @@ impl ContentStore {
         Ok(false)
     }
 
-    pub fn list_categories(&self) -> Result<Vec<String>, BiadNetError> {
+    pub fn list_categories(&self) -> Result<Vec<String>, Error> {
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         Ok(tx.list_categories()?)
     }
 
-    pub fn list_abstracts(&self, cats: Vec<String>) -> Result<Vec<Vec<String>>, BiadNetError> {
+    pub fn list_abstracts(&self, cats: Vec<String>) -> Result<Vec<Vec<String>>, Error> {
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         Ok(tx.list_abstracts(cats)?)
     }
 
-    pub fn read_contents(&self, ids: Vec<String>) -> Result<Vec<Readable>, BiadNetError> {
+    pub fn read_contents(&self, ids: Vec<String>) -> Result<Vec<Readable>, Error> {
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
         Ok(tx.retrieve_contents(ids)?.iter().map( |r| Readable::new(r, self.trunk.clone())).collect())

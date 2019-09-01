@@ -30,7 +30,7 @@ use murmel::timeout::SharedTimeout;
 
 use crate::p2p_biadnet::ExpectedReply;
 use crate::messages::{PollAddressMessage, Message};
-use crate::error::BiadNetError;
+use crate::error::Error;
 use crate::iblt::{IBLTKey, estimate_diff_size, IBLT, IBLTEntry};
 use crate::db::SharedDB;
 use std::time::UNIX_EPOCH;
@@ -215,10 +215,10 @@ impl NetAddress {
     }
 
 
-    pub fn socket_address(&self) -> Result<SocketAddr, BiadNetError> {
+    pub fn socket_address(&self) -> Result<SocketAddr, Error> {
         let addr = &self.address;
         if addr[0..3] == ONION[0..3] {
-            return Err(BiadNetError::IO(io::Error::from(io::ErrorKind::AddrNotAvailable)));
+            return Err(Error::IO(io::Error::from(io::ErrorKind::AddrNotAvailable)));
         }
         let ipv6 = Ipv6Addr::new(
             addr[0],addr[1],addr[2],addr[3],
@@ -232,11 +232,11 @@ impl NetAddress {
         }
     }
 
-    pub fn to_string(&self) -> Result<String, BiadNetError> {
+    pub fn to_string(&self) -> Result<String, Error> {
         Ok(format!("{}", self.socket_address()?))
     }
 
-    pub fn from_str(s: &str) -> Result<NetAddress, BiadNetError> {
+    pub fn from_str(s: &str) -> Result<NetAddress, Error> {
         use std::str::FromStr;
 
         let (address, port) = match SocketAddr::from_str(s)? {

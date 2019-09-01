@@ -16,18 +16,17 @@
 //! BiadNet errors
 
 use std::convert;
-use std::error::Error;
 use std::fmt;
 use std::io;
-use crate::bitcoin_wallet::error::WalletError;
+use crate::bitcoin_wallet;
 use crate::bitcoin::blockdata::script;
 
 /// An error class to offer a unified error interface upstream
-pub enum BiadNetError {
+pub enum Error {
     /// Unsupported
     Unsupported(&'static str),
     /// wallet related error
-    Wallet(WalletError),
+    Wallet(bitcoin_wallet::error::Error),
     /// IO error
     IO(io::Error),
     /// DB error
@@ -36,92 +35,92 @@ pub enum BiadNetError {
     Script(script::Error)
 }
 
-impl Error for BiadNetError {
+impl std::error::Error for Error {
     fn description(&self) -> &str {
         match *self {
-            BiadNetError::Unsupported(ref s) => s,
-            BiadNetError::Wallet(ref err) => err.description(),
-            BiadNetError::IO(ref err) => err.description(),
-            BiadNetError::DB(ref err) => err.description(),
-            BiadNetError::Script(ref err) => err.description()
+            Error::Unsupported(ref s) => s,
+            Error::Wallet(ref err) => err.description(),
+            Error::IO(ref err) => err.description(),
+            Error::DB(ref err) => err.description(),
+            Error::Script(ref err) => err.description()
         }
     }
 
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match *self {
-            BiadNetError::Unsupported(_) => None,
-            BiadNetError::Wallet(ref err) => Some(err),
-            BiadNetError::IO(ref err) => Some(err),
-            BiadNetError::DB(ref err) => Some(err),
-            BiadNetError::Script(ref err) => Some(err)
+            Error::Unsupported(_) => None,
+            Error::Wallet(ref err) => Some(err),
+            Error::IO(ref err) => Some(err),
+            Error::DB(ref err) => Some(err),
+            Error::Script(ref err) => Some(err)
         }
     }
 }
 
-impl fmt::Display for BiadNetError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             // Both underlying errors already impl `Display`, so we defer to
             // their implementations.
-            BiadNetError::Unsupported(ref s) => write!(f, "Unsupported: {}", s),
-            BiadNetError::Wallet(ref s) => write!(f, "{}", s),
-            BiadNetError::IO(ref s) => write!(f, "{}", s),
-            BiadNetError::DB(ref s) =>  write!(f, "{}", s),
-            BiadNetError::Script(ref s) =>  write!(f, "{}", s),
+            Error::Unsupported(ref s) => write!(f, "Unsupported: {}", s),
+            Error::Wallet(ref s) => write!(f, "{}", s),
+            Error::IO(ref s) => write!(f, "{}", s),
+            Error::DB(ref s) =>  write!(f, "{}", s),
+            Error::Script(ref s) =>  write!(f, "{}", s),
         }
     }
 }
 
-impl fmt::Debug for BiadNetError {
+impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         (self as &dyn fmt::Display).fmt(f)
     }
 }
 
-impl convert::From<WalletError> for BiadNetError {
-    fn from(err: WalletError) -> BiadNetError {
-        BiadNetError::Wallet(err)
+impl convert::From<bitcoin_wallet::error::Error> for Error {
+    fn from(err: bitcoin_wallet::error::Error) -> Error {
+        Error::Wallet(err)
     }
 }
 
-impl convert::From<io::Error> for BiadNetError {
-    fn from(err: io::Error) -> BiadNetError {
-        BiadNetError::IO(err)
+impl convert::From<io::Error> for Error {
+    fn from(err: io::Error) -> Error {
+        Error::IO(err)
     }
 }
 
-impl convert::From<rusqlite::Error> for BiadNetError {
-    fn from(err: rusqlite::Error) -> BiadNetError {
-        BiadNetError::DB(err)
+impl convert::From<rusqlite::Error> for Error {
+    fn from(err: rusqlite::Error) -> Error {
+        Error::DB(err)
     }
 }
 
-impl convert::From<std::net::AddrParseError> for BiadNetError {
-    fn from(_: std::net::AddrParseError) -> BiadNetError {
-        BiadNetError::IO(io::Error::from(io::ErrorKind::InvalidInput))
+impl convert::From<std::net::AddrParseError> for Error {
+    fn from(_: std::net::AddrParseError) -> Error {
+        Error::IO(io::Error::from(io::ErrorKind::InvalidInput))
     }
 }
 
-impl convert::From<serde_cbor::error::Error> for BiadNetError {
-    fn from(_: serde_cbor::error::Error) -> BiadNetError {
-        BiadNetError::IO(io::Error::from(io::ErrorKind::InvalidInput))
+impl convert::From<serde_cbor::error::Error> for Error {
+    fn from(_: serde_cbor::error::Error) -> Error {
+        Error::IO(io::Error::from(io::ErrorKind::InvalidInput))
     }
 }
 
-impl convert::From<bitcoin_hashes::Error> for BiadNetError {
-    fn from(_: bitcoin_hashes::Error) -> BiadNetError {
-        BiadNetError::IO(io::Error::from(io::ErrorKind::InvalidInput))
+impl convert::From<bitcoin_hashes::Error> for Error {
+    fn from(_: bitcoin_hashes::Error) -> Error {
+        Error::IO(io::Error::from(io::ErrorKind::InvalidInput))
     }
 }
 
-impl convert::From<bitcoin_hashes::hex::Error> for BiadNetError {
-    fn from(_: bitcoin_hashes::hex::Error) -> BiadNetError {
-        BiadNetError::IO(io::Error::from(io::ErrorKind::InvalidInput))
+impl convert::From<bitcoin_hashes::hex::Error> for Error {
+    fn from(_: bitcoin_hashes::hex::Error) -> Error {
+        Error::IO(io::Error::from(io::ErrorKind::InvalidInput))
     }
 }
 
-impl convert::From<script::Error> for BiadNetError {
-    fn from(err: script::Error) -> BiadNetError {
-        BiadNetError::Script(err)
+impl convert::From<script::Error> for Error {
+    fn from(err: script::Error) -> Error {
+        Error::Script(err)
     }
 }
