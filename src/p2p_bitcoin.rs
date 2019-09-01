@@ -41,7 +41,7 @@ use murmel::{
     chaindb::SharedChainDB,
     dns::dns_seed,
     downstream::Downstream,
-    error::MurmelError,
+    error::Error,
     ping::Ping,
     p2p::{
         PeerMessageSender, PeerSource, P2PControlSender, PeerMessage, PeerMessageReceiver,
@@ -187,7 +187,7 @@ impl P2PBitcoin {
 struct KeepConnected {
     network: Network,
     min_connections: usize,
-    connections: Vec<(SocketAddr, Box<dyn Future<Item=SocketAddr, Error=MurmelError> + Send>)>,
+    connections: Vec<(SocketAddr, Box<dyn Future<Item=SocketAddr, Error=Error> + Send>)>,
     p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>,
     dns: Vec<SocketAddr>,
     earlier: HashSet<SocketAddr>,

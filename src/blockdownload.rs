@@ -21,7 +21,7 @@ use bitcoin::{BitcoinHash, blockdata::{
 }, Block};
 use bitcoin_hashes::sha256d;
 use murmel::chaindb::SharedChainDB;
-use murmel::error::MurmelError;
+use murmel::error::Error;
 use murmel::p2p::{P2PControl, P2PControlSender, PeerId, PeerMessage, PeerMessageReceiver, PeerMessageSender, SERVICE_BLOCKS};
 use murmel::timeout::{ExpectedReply, SharedTimeout};
 use murmel::downstream::SharedDownstream;
@@ -258,7 +258,7 @@ impl BlockDownload {
                                 }
                             }
                             Ok(None) => {}
-                            Err(MurmelError::SpvBadProofOfWork) => {
+                            Err(Error::SpvBadProofOfWork) => {
                                 info!("Incorrect POW, banning peer={}", peer);
                                 self.p2p.ban(peer, 100);
                             }

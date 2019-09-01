@@ -35,7 +35,7 @@ use murmel::{
     dispatcher::Dispatcher,
     p2p::P2P,
     chaindb::SharedChainDB,
-    error::MurmelError,
+    error::Error,
     p2p::{
         PeerMessageSender, PeerSource,
         P2PConfig, P2PControl, Buffer
@@ -268,7 +268,7 @@ impl P2PBiadNet {
 
 struct KeepConnected {
     min_connections: usize,
-    connections: Vec<(SocketAddr, Box<dyn Future<Item=SocketAddr, Error=MurmelError> + Send>)>,
+    connections: Vec<(SocketAddr, Box<dyn Future<Item=SocketAddr, Error=Error> + Send>)>,
     p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>,
     dns: Vec<SocketAddr>,
     earlier: HashSet<SocketAddr>,
