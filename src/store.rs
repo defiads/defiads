@@ -301,7 +301,7 @@ impl ContentStore {
         // is the block on trunk the proof refers to
         if let Some(height) = self.trunk.get_height(content.funding.get_block_hash()) {
             // not yet expired
-            if height + content.term as u32 <= self.trunk.len() {
+            if height + content.term as u32 >= self.trunk.len() {
                 // get that header
                 if let Some(header) = self.trunk.get_header(content.funding.get_block_hash()) {
                     // check if header's merkle root matches that of the proof
