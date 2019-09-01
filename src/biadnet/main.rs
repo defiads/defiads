@@ -290,8 +290,8 @@ pub fn main () {
     };
 
 
-    let mut chaindb = ChainDB::new(db_path.as_path(), bitcoin_network, 0).expect("can not open chain db");
-    chaindb.init(false).expect("can not initialize db");
+    let mut chaindb = ChainDB::new(db_path.as_path(), bitcoin_network).expect("can not open chain db");
+    chaindb.init().expect("can not initialize db");
     let chaindb = Arc::new(RwLock::new(chaindb));
 
     let db = Arc::new(Mutex::new(db));
