@@ -542,7 +542,7 @@ mod test {
         assert_eq!(store.balance(), vec!(NEW_COINS, NEW_COINS));
 
         let burn = Address::p2shwsh(&Builder::new().push_opcode(all::OP_VERIFY).into_script(), Network::Testnet);
-        let (burn_half, _) = store.withdraw(PASSPHRASE.to_string(), burn, 1, Some(NEW_COINS/2)).unwrap();
+        let (burn_half, _) = store.withdraw(PASSPHRASE.to_string(), burn.clone(), 1, Some(NEW_COINS/2)).unwrap();
 
         let mut next = mine(&store, 2, &miner);
         add_tx(&mut next, burn_half);
@@ -566,5 +566,13 @@ mod test {
         store.add_header(4, &next.header).unwrap();
         store.block_connected(&next, 4).unwrap();
         assert!(store.list_categories().unwrap().is_empty());
+
+        let (burn_all, _) = store.withdraw(PASSPHRASE.to_string(), burn, 1, None).unwrap();
+        let mut next = mine(&store, 5, &miner);
+        add_tx(&mut next, burn_all);
+        trunk.extend(&next.header);
+        store.add_header(5, &next.header).unwrap();
+        store.block_connected(&next, 5).unwrap();
+        assert_eq!(store.balance(), vec!(NEW_COINS, NEW_COINS));
     }
 }
