@@ -297,7 +297,7 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore, apikey: S
         }
 
         match moved_store.write().unwrap().fund(&id, term, amount, fee_per_vbyte, passpharse) {
-            Ok(txid) => Ok(serde_json::to_value(txid).unwrap()),
+            Ok((txid, _,_,_)) => Ok(serde_json::to_value(txid).unwrap()),
             Err(e) => Err(Error::invalid_params(e.to_string().as_str()))
         }
     });

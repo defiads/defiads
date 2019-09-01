@@ -16,7 +16,7 @@
 
 //! store
 
-use bitcoin::{BlockHeader, BitcoinHash, Block, Address, PublicKey, Script};
+use bitcoin::{BlockHeader, BitcoinHash, Block, Address, PublicKey, Script, Transaction};
 use bitcoin_hashes::{sha256, sha256d, Hash};
 use std::sync::{RwLock, Arc};
 
@@ -122,8 +122,8 @@ impl ContentStore {
         id
     }
 
-    pub fn fund (&mut self, id: &sha256::Hash, term: u16, amount: u64, fee_per_vbyte: u64, passpharse: String) -> Result<sha256d::Hash, BiadNetError> {
-        let (transaction, funder) = self.wallet.fund(id, term, passpharse, fee_per_vbyte, amount, self.trunk.clone(),
+    pub fn fund (&mut self, id: &sha256::Hash, term: u16, amount: u64, fee_per_vbyte: u64, passpharse: String) -> Result<(sha256d::Hash, Transaction, PublicKey, u64), BiadNetError> {
+        let (transaction, funder,fee) = self.wallet.fund(id, term, passpharse, fee_per_vbyte, amount, self.trunk.clone(),
             |pk, term| Self::funding_script(pk, term.unwrap()))?;
         let txid = transaction.txid();
         let mut db = self.db.lock().unwrap();
@@ -132,26 +132,28 @@ impl ContentStore {
         tx.store_txout(&transaction, Some((&funder, id, term))).expect("can not store outgoing transaction");
         tx.commit();
         if let Some(ref txout) = self.txout {
-            txout.send(PeerMessage::Outgoing(NetworkMessage::Tx(transaction)));
+            txout.send(PeerMessage::Outgoing(NetworkMessage::Tx(transaction.clone())));
         }
         info!("Wallet balance: {} satoshis {} available", self.wallet.balance(), self.wallet.available_balance(self.trunk.len(), |h| self.trunk.get_height(h)));
-        Ok(txid)
+        Ok((txid, transaction, funder, fee))
     }
 
-    fn funding_script (tweaked: &PublicKey, term: u16) -> Script {
-        let script = Builder::new()
+    pub fn funding_script(tweaked: &PublicKey, term: u16) -> Script {
+        Builder::new()
             .push_int(term as i64)
             .push_opcode(all::OP_CSV)
             .push_opcode(all::OP_DROP)
             .push_slice(tweaked.to_bytes().as_slice())
             .push_opcode(all::OP_CHECKSIG)
-            .into_script();
+            .into_script()
+    }
 
-        Address::p2wsh(&script, Network::Bitcoin).script_pubkey()
+    pub fn funding_address (tweaked: &PublicKey, term: u16) -> Address {
+        Address::p2wsh(&Self::funding_script(tweaked, term), Network::Bitcoin)
     }
 
     pub fn withdraw (&mut self, passpharse: String, address: Address, fee_per_vbyte: u64, amount: Option<u64>) -> Result<sha256d::Hash, BiadNetError> {
-        let transaction = self.wallet.withdraw(passpharse, address, fee_per_vbyte, amount, self.trunk.clone())?;
+        let (transaction, _) = self.wallet.withdraw(passpharse, address, fee_per_vbyte, amount, self.trunk.clone())?;
         let txid = transaction.txid();
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
@@ -299,7 +301,7 @@ impl ContentStore {
         // is the block on trunk the proof refers to
         if let Some(height) = self.trunk.get_height(content.funding.get_block_hash()) {
             // not yet expired
-            if height + content.term as u32 > self.trunk.len() {
+            if height + content.term as u32 <= self.trunk.len() {
                 // get that header
                 if let Some(header) = self.trunk.get_header(content.funding.get_block_hash()) {
                     // check if header's merkle root matches that of the proof
@@ -312,7 +314,7 @@ impl ContentStore {
                             let mut tweaked = content.funder.clone();
                             self.ctx.tweak_exp_add(&mut tweaked, &digest[..]).unwrap();
 
-                            let commitment = Self::funding_script(&tweaked, content.term);
+                            let commitment = Self::funding_address(&tweaked, content.term).script_pubkey();
                             if let Some((_, o)) = t.output.iter().enumerate().find(|(_, o)| o.script_pubkey == commitment) {
                                 // ok there is a commitment to this ad
                                 debug!("add content {}", &digest);
@@ -402,20 +404,30 @@ mod test {
     use super::ContentStore;
     use crate::db::DB;
     use crate::wallet::Wallet;
-    use bitcoin::{
-        BlockHeader,
-        BitcoinHash,
-        util::bip32::ExtendedPubKey
-    };
+    use bitcoin::{network::constants::Network, blockdata::opcodes::all, BlockHeader, Block, BitcoinHash, util::bip32::ExtendedPubKey, Address, Transaction, TxIn, OutPoint, TxOut, PublicKey};
     use std::{
         sync::{Arc, Mutex},
         str::FromStr
     };
     use bitcoin_hashes::sha256d;
     use crate::trunk::Trunk;
+    use bitcoin::blockdata::constants::genesis_block;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use bitcoin::util::hash::MerkleRoot;
+    use bitcoin_wallet::account::{Account, AccountAddressType, Unlocker};
+    use bitcoin::blockdata::script::Builder;
+
+    const NEW_COINS:u64 = 5000000000;
+    const PASSPHRASE:&str = "whatever";
 
     struct TestTrunk {
         trunk: Arc<Mutex<Vec<BlockHeader>>>
+    }
+
+    impl TestTrunk {
+        fn extend(&self, header: &BlockHeader) {
+            self.trunk.lock().unwrap().push(header.clone());
+        }
     }
 
     impl Trunk for TestTrunk {
@@ -450,17 +462,112 @@ mod test {
         }
     }
 
-    fn new_store () -> ContentStore {
-        let trunk = TestTrunk{trunk: Arc::new(Mutex::new(Vec::new()))};
-        ContentStore::new(Arc::new(Mutex::new(DB::memory().unwrap())), 1024*1024, Arc::new(trunk),
-                          Wallet::from_encrypted(
-                              hex::decode("0e05ba48bb0fdc7285dc9498202aeee5e1777ac4f55072b30f15f6a8632ad0f3fde1c41d9e162dbe5d3153282eaebd081cf3b3312336fc56f5dd18a2df6ea48c1cdd11a1ed11281cd2e0f864f02e5bed5ab03326ed24e43b8a184acff9cb4e730db484e33f2b24295a97b2ca87871a69384eb64d4160ce8b3e8b4d90234040970e531d4333a8979dbe533c2b2668bf43b6607b2d24c5b42765ebfdd075fd173c").unwrap().as_slice(),
-                            ExtendedPubKey::from_str("tpubD6NzVbkrYhZ4XKz4vgwBmnnVmA7EgWhnXvimQ4krq94yUgcSSbroi4uC1xbZ3UGMxG9M2utmaPjdpMrWW2uKRY9Mj4DZWrrY8M4pry8shsK").unwrap(),
-                              1567260002)).unwrap()
+    fn new_store (trunk: Arc<TestTrunk>) -> ContentStore {
+        let mut memdb = DB::memory().unwrap();
+        {
+            let mut tx = memdb.transaction();
+            tx.create_tables();
+            tx.commit();
+        }
+        let mut wallet = Wallet::from_encrypted(
+            hex::decode("0e05ba48bb0fdc7285dc9498202aeee5e1777ac4f55072b30f15f6a8632ad0f3fde1c41d9e162dbe5d3153282eaebd081cf3b3312336fc56f5dd18a2df6ea48c1cdd11a1ed11281cd2e0f864f02e5bed5ab03326ed24e43b8a184acff9cb4e730db484e33f2b24295a97b2ca87871a69384eb64d4160ce8b3e8b4d90234040970e531d4333a8979dbe533c2b2668bf43b6607b2d24c5b42765ebfdd075fd173c").unwrap().as_slice(),
+            ExtendedPubKey::from_str("tpubD6NzVbkrYhZ4XKz4vgwBmnnVmA7EgWhnXvimQ4krq94yUgcSSbroi4uC1xbZ3UGMxG9M2utmaPjdpMrWW2uKRY9Mj4DZWrrY8M4pry8shsK").unwrap(),
+            1567260002);
+        let mut unlocker = Unlocker::new_for_master(&wallet.master, PASSPHRASE, None).unwrap();
+        wallet.master.add_account(Account::new(&mut unlocker, AccountAddressType::P2WPKH, 0, 0, 10).unwrap());
+        wallet.master.add_account(Account::new(&mut unlocker, AccountAddressType::P2WPKH, 0, 1, 10).unwrap());
+        wallet.master.add_account(Account::new(&mut unlocker, AccountAddressType::P2WSH(4711), 1, 0, 0).unwrap());
+
+        ContentStore::new(Arc::new(Mutex::new(memdb)), 1024*1024, trunk, wallet).unwrap()
     }
 
-    #[test]
-    pub fn test_trunk () {
+    fn new_block (prev: &sha256d::Hash) -> Block {
+        Block {
+            header :BlockHeader {
+                version: 1,
+                time: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u32,
+                nonce: 0,
+                bits: 0x1d00ffff,
+                prev_blockhash: prev.clone(),
+                merkle_root: sha256d::Hash::default()
+            },
+            txdata: Vec::new()
+        }
+    }
 
+    fn coin_base(miner: &Address, height: u32) -> Transaction {
+        Transaction {
+            version: 2,
+            lock_time: 0,
+            input: vec!(TxIn {
+                sequence: 0xffffffff,
+                witness: Vec::new(),
+                previous_output: OutPoint{ txid: sha256d::Hash::default(), vout: 0 },
+                script_sig: Builder::new().push_int(height as i64).into_script()
+            }),
+            output: vec!(TxOut{
+                value: NEW_COINS,
+                script_pubkey: miner.script_pubkey()
+            })
+        }
+    }
+
+    fn add_tx (block: &mut Block, tx: Transaction) {
+        block.txdata.push(tx);
+        block.header.merkle_root = block.merkle_root();
+    }
+
+    fn mine(store: &ContentStore, height: u32, miner: &Address) -> Block {
+        let mut block = new_block(&store.trunk.get_tip().unwrap().bitcoin_hash());
+        add_tx(&mut block, coin_base(miner, height));
+        block
+    }
+
+
+    #[test]
+    pub fn test () {
+        let trunk = Arc::new(
+            TestTrunk{trunk: Arc::new(Mutex::new(Vec::new()))});
+        let mut store = new_store(trunk.clone());
+        let genesis = genesis_block(Network::Testnet);
+        let miner = store.wallet.master.get_mut((0,0)).unwrap().next_key().unwrap().address.clone();
+
+        trunk.extend(&genesis.header);
+        store.add_header(0, &genesis.header).unwrap();
+        store.block_connected(&genesis, 0).unwrap();
+
+        let next = mine(&store, 1, &miner);
+        trunk.extend(&next.header);
+        store.add_header(1, &next.header).unwrap();
+        store.block_connected(&next, 1).unwrap();
+
+        assert_eq!(store.balance(), vec!(NEW_COINS, NEW_COINS));
+
+        let burn = Address::p2shwsh(&Builder::new().push_opcode(all::OP_VERIFY).into_script(), Network::Testnet);
+        let (burn_half, fee) = store.wallet.withdraw(PASSPHRASE.to_string(), burn, 1, Some(NEW_COINS/2), trunk.clone()).unwrap();
+
+        let mut next = mine(&store, 2, &miner);
+        add_tx(&mut next, burn_half);
+        trunk.extend(&next.header);
+        store.add_header(2, &next.header).unwrap();
+        store.block_connected(&next, 2).unwrap();
+        assert_eq!(store.balance(), vec!(NEW_COINS + NEW_COINS/2, NEW_COINS + NEW_COINS/2));
+
+        let id = store.prepare_publication("/foo/what".to_string(), "index.html".to_string(), "<head></head>".to_string());
+        let (_, fundit, _, _) = store.fund(&id, 1, NEW_COINS,5, PASSPHRASE.to_string()).unwrap();
+
+        let mut next = mine(&store, 3, &miner);
+        add_tx(&mut next, fundit);
+        trunk.extend(&next.header);
+        store.add_header(3, &next.header).unwrap();
+        store.block_connected(&next, 3).unwrap();
+
+        assert!(store.list_categories().unwrap().contains(&"/foo/what".to_string ()));
+
+        let next = mine(&store, 4, &miner);
+        trunk.extend(&next.header);
+        store.add_header(4, &next.header).unwrap();
+        store.block_connected(&next, 4).unwrap();
+        assert!(store.list_categories().unwrap().is_empty());
     }
 }
