@@ -24,7 +24,8 @@ siphasher="0.3"
 rand = "0.7"
 rand_distr = "0.2"
 log="0.4"
-futures={ git= "https://github.com/tamasblummer/futures-rs.git", tag = "0.2.1" }
+futures-preview = "=0.3.0-alpha.18"
+futures-timer = "0.3"
 rusqlite={version="0.20", features=["bundled"]}
 jsonrpc-http-server = "13.0"
 clap = "2.33"

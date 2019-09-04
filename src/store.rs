@@ -64,7 +64,7 @@ pub struct ContentStore {
 impl ContentStore {
     /// new content store
     pub fn new(db: SharedDB, storage_limit: u64, trunk: Arc<dyn Trunk + Send + Sync>, wallet: Wallet) -> Result<ContentStore, Error> {
-        let mut mins;
+        let mins;
         let ksequence;
         let n_keys;
         {

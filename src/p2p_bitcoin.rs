@@ -32,16 +32,21 @@ use bitcoin::{
     }
 };
 use bitcoin_hashes::sha256d;
-use future::Future;
-use futures::{future, Never, Async, Poll, task, executor::Executor};
-
+use futures::{
+    executor::{ThreadPool},
+    future,
+    Poll as Async,
+    FutureExt, StreamExt,
+    task::{SpawnExt, Context},
+    Future
+};
+use futures_timer::Interval;
 use murmel::{
     dispatcher::Dispatcher,
     p2p::P2P,
     chaindb::SharedChainDB,
     dns::dns_seed,
     downstream::Downstream,
-    error::Error,
     ping::Ping,
     p2p::{
         PeerMessageSender, PeerSource, P2PControlSender, PeerMessage, PeerMessageReceiver,
@@ -52,15 +57,14 @@ use murmel::{
 use rand::{RngCore, thread_rng};
 
 use crate::db::SharedDB;
-use futures::executor::ThreadPool;
 use crate::store::SharedContentStore;
 use murmel::p2p::PeerId;
 use std::collections::HashMap;
 use std::time::Duration;
-use futures::task::Waker;
 use crate::trunk::Trunk;
 use crate::blockdownload::BlockDownload;
 use crate::sendtx::SendTx;
+use std::pin::Pin;
 
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
@@ -80,7 +84,7 @@ impl P2PBitcoin {
     pub fn new (network: Network, connections: usize, peers: Vec<SocketAddr>, discovery: bool, chaindb: SharedChainDB, db: SharedDB, content_store: SharedContentStore, birth: u64) -> P2PBitcoin {
         P2PBitcoin {connections, peers, chaindb, network, db, content_store, discovery, birth}
     }
-    pub fn start(&self, thread_pool: &mut ThreadPool) {
+    pub fn start(&self, executor: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
 
         let mut dispatcher = Dispatcher::new(receiver);
@@ -150,125 +154,77 @@ impl P2PBitcoin {
         dispatcher.add_listener(sendtx.clone());
         self.content_store.write().unwrap().set_tx_sender(sendtx);
 
-        let p2p2 = p2p.clone();
-        let p2p_task = Box::new(future::poll_fn(move |ctx| {
-            p2p2.run("bitcoin", murmel::p2p::SERVICE_BLOCKS, ctx).unwrap();
-            Ok(Async::Ready(()))
-        }));
-        // start the task that runs all network communication
-        thread_pool.spawn(p2p_task).unwrap();
-
-        let keep_connected = Self::keep_connected(self.network, p2p.clone(), self.peers.clone(), self.connections, self.discovery, self.db.clone());
-        let waker = keep_connected.waker.clone();
-        thread::Builder::new().name("bitkeep".to_string()).spawn(move ||
-            {
-                thread::sleep(Duration::from_secs(10));
-                let mut waker = waker.lock().unwrap();
-                if let Some(ref mut w) = *waker {
-                    w.wake();
-                }
-            }).expect("can not start bitcoin connector thread");
-        info!("Bitcoin p2p engine started");
-        thread_pool.spawn(Box::new(keep_connected)).unwrap();
-    }
-
-    fn keep_connected(network: Network, p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize, discovery: bool, db: SharedDB) -> KeepConnected {
-        // add initial peers if any
-        let mut connections = Vec::new();
-        for addr in &peers {
-            connections.push((*addr, p2p.add_peer("bitcoin", PeerSource::Outgoing(addr.clone()))));
+        let p2p = p2p.clone();
+        for addr in &self.peers {
+            executor.spawn(p2p.add_peer("bitcoin", PeerSource::Outgoing(addr.clone())).map(|_|())).expect("can not spawn task for peers");
         }
 
-        return KeepConnected { network, min_connections, connections, p2p,
-            dns: Vec::new(), earlier: HashSet::new(), db, waker: Arc::new(Mutex::new(None)), discovery, peers };
-    }
-}
-
-struct KeepConnected {
-    network: Network,
-    min_connections: usize,
-    connections: Vec<(SocketAddr, Box<dyn Future<Item=SocketAddr, Error=Error> + Send>)>,
-    p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>,
-    dns: Vec<SocketAddr>,
-    earlier: HashSet<SocketAddr>,
-    db: SharedDB,
-    waker: Arc<Mutex<Option<Waker>>>,
-    discovery: bool,
-    peers: Vec<SocketAddr>
-}
-
-// this task runs until it runs out of peers
-impl Future for KeepConnected {
-    type Item = ();
-    type Error = Never;
-
-    fn poll(&mut self, cx: &mut task::Context) -> Poll<Self::Item, Self::Error> {
-        // find a finished peers
-        let finished = self.connections.iter_mut().enumerate().filter_map(|(i, (_, c))| {
-            match c.poll(cx) {
-                Ok(Async::Pending) => None,
-                Ok(Async::Ready(address)) => {
-                    debug!("keep connected woke up to lost peer at {}", address);
-                    Some(i)
-                },
-                Err(e) => {
-                    debug!("keep connected woke up to error {:?}", e);
-                    Some(i)
-                }
-            }
-        }).collect::<Vec<_>>();
-        let mut n = 0;
-        for i in finished.iter() {
-            let (socket, _) = self.connections.remove(*i - n);
-            n += 1;
-            if !self.discovery && self.peers.contains(&socket) {
-                // attempt to re-connect to mandatory peers
-                self.connections.push((socket, self.p2p.add_peer("bitcoin", PeerSource::Outgoing(socket))));
-            }
-        }
-        if self.discovery {
-            while self.connections.len() < self.min_connections {
-                if let Some(addr) = self.get_an_address() {
-                    self.connections.push((addr, self.p2p.add_peer("bitcoin", PeerSource::Outgoing(addr))));
-                } else {
-                    warn!("Want to connect to {} bitcoin peers but have found only {}", self.min_connections, self.connections.len());
-                    break;
-                }
-            }
-        }
+        let dns = dns_seed(self.network);
         {
-            let mut waker = self.waker.lock().unwrap();
-            *waker = Some(cx.waker().clone());
-        }
-        return Ok(Async::Pending);
-    }
-}
-
-impl KeepConnected {
-    fn get_an_address(&mut self) -> Option<SocketAddr> {
-        if let Ok(Some(a)) = self.db.lock().unwrap().transaction().get_an_address("bitcoin", &self.earlier) {
-            self.earlier.insert(a);
-            return Some(a);
-        }
-        if self.dns.len() == 0 {
-            self.dns = dns_seed(self.network);
             let mut db = self.db.lock().unwrap();
             let mut tx = db.transaction();
-            for a in &self.dns {
+            for a in &dns {
                 tx.store_address("bitcoin", a, 0, 0, 0).expect("can not store addresses in db");
             }
             tx.commit();
         }
-        if self.dns.len() > 0 {
-            let eligible = self.dns.iter().filter(|a| !self.earlier.contains(a)).cloned().collect::<Vec<_>>();
-            if eligible.len() > 0 {
-                let mut rng = thread_rng();
-                let choice = eligible[(rng.next_u32() as usize) % eligible.len()];
-                self.earlier.insert(choice.clone());
-                return Some(choice);
+
+        let keep_connected = KeepConnected {
+            min_connections: self.connections,
+            p2p: p2p.clone(),
+            earlier: HashSet::new(),
+            db: self.db.clone(),
+            dns,
+            cex: executor.clone()
+        };
+        executor.spawn(Interval::new(Duration::new(10, 0)).for_each(move |_| keep_connected.clone())).expect("can not keep connected");
+
+        let p2p = p2p.clone();
+        let mut cex = executor.clone();
+        executor.spawn(future::poll_fn(move |_| {
+            let needed_services = 0;
+            p2p.poll_events("bitcoin", needed_services, &mut cex);
+            Async::Ready(())
+        })).expect("can not spawn bitcoin event loop");
+    }
+}
+
+#[derive(Clone)]
+struct KeepConnected {
+    cex: ThreadPool,
+    dns: Vec<SocketAddr>,
+    db: SharedDB,
+    earlier: HashSet<SocketAddr>,
+    p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>,
+    min_connections: usize
+}
+
+impl Future for KeepConnected {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Async<Self::Output> {
+        if self.p2p.connected_peers() < self.min_connections {
+            let choice;
+            {
+               choice = self.db.lock().unwrap().transaction().get_an_address("bitcoin", &self.earlier).expect("can not read addresses from db")
+            }
+            if let Some(choice) = choice {
+                self.earlier.insert(choice);
+                let add = self.p2p.add_peer("bitcoin", PeerSource::Outgoing(choice)).map(|_| ());
+                self.cex.spawn(add).expect("can not add peer for outgoing connection");
+            }
+            else {
+                let eligible = self.dns.iter().cloned().filter(|a| !self.earlier.contains(a)).collect::<Vec<_>>();
+                if eligible.len() > 0 {
+                    let mut rng = thread_rng();
+                    let choice = eligible[(rng.next_u32() as usize) % eligible.len()];
+                    self.earlier.insert(choice.clone());
+                    let add = self.p2p.add_peer("bitcoin", PeerSource::Outgoing(choice)).map(|_| ());
+                    self.cex.spawn(add).expect("can not add peer for outgoing connection");
+                }
             }
         }
-        None
+        Async::Ready(())
     }
 }
 

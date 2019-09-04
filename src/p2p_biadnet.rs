@@ -26,16 +26,20 @@ use bitcoin::{
     BlockHeader
 };
 use bitcoin_hashes::sha256d;
-use future::Future;
-use futures::{future, Never, Async, Poll, task,
-              executor::{Executor, ThreadPool}
+use futures::{
+    executor::{ThreadPool},
+    future,
+    Poll as Async,
+    FutureExt, StreamExt,
+    task::{SpawnExt, Context},
+    Future
 };
+use futures_timer::Interval;
 
 use murmel::{
     dispatcher::Dispatcher,
     p2p::P2P,
     chaindb::SharedChainDB,
-    error::Error,
     p2p::{
         PeerMessageSender, PeerSource,
         P2PConfig, P2PControl, Buffer
@@ -58,8 +62,8 @@ use murmel::p2p::PeerMessage;
 use std::collections::HashMap;
 use murmel::p2p::PeerId;
 use std::time::Duration;
-use futures::task::Waker;
 use crate::trunk::Trunk;
+use std::pin::Pin;
 
 const MAGIC: u32 = 0xB1AD;
 const MAX_PROTOCOL_VERSION: u32 = 1;
@@ -199,7 +203,7 @@ impl P2PBiadNet {
     pub fn new (connections: usize, peers: Vec<SocketAddr>, listen: Vec<SocketAddr>, discovery: bool, db: SharedDB, content_store: SharedContentStore, test: bool) -> P2PBiadNet {
         P2PBiadNet {connections, peers, listen, db, content_store, discovery, test}
     }
-    pub fn start(&self, thread_pool: &mut ThreadPool) {
+    pub fn start(&self, executor: &mut ThreadPool) {
         let (sender, receiver) = mpsc::sync_channel(100);
         let mut dispatcher = Dispatcher::new(receiver);
 
@@ -226,133 +230,81 @@ impl P2PBiadNet {
         let address_pool = AddressPoolMaintainer::new(p2p_control.clone(), self.db.clone());
         dispatcher.add_listener(address_pool);
 
-        let p2p2 = p2p.clone();
-        let p2p_task = Box::new(future::poll_fn(move |ctx| {
-            p2p2.run("biadnet", 0, ctx).unwrap();
-            Ok(Async::Ready(()))
-        }));
-
         for addr in &self.listen {
             p2p_control.send(P2PControl::Bind(addr.clone()));
         }
 
-        // start the task that runs all network communication
-        thread_pool.spawn(p2p_task).unwrap();
-
-        info!("BiadNet p2p engine started");
-        let keep_connected = Self::keep_connected(p2p.clone(), self.peers.clone(), self.connections, self.discovery, self.db.clone(), self.test);
-        let waker = keep_connected.waker.clone();
-        thread::Builder::new().name("biadkeep".to_string()).spawn(move ||
-            {
-                thread::sleep(Duration::from_secs(10));
-                let mut waker = waker.lock().unwrap();
-                if let Some(ref mut w) = *waker {
-                    w.wake();
-                }
-            }).expect("can not start biadnet connector thread");
-        thread_pool.spawn(Box::new(keep_connected)).unwrap();
-    }
-
-    fn keep_connected(p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>, peers: Vec<SocketAddr>, min_connections: usize, discovery: bool, db: SharedDB, test: bool) -> KeepConnected {
-        // add initial peers if any
-        let mut connections = Vec::new();
-        for addr in &peers {
-            connections.push((*addr, p2p.add_peer("biadnet", PeerSource::Outgoing(addr.clone()))));
+        let p2p = p2p.clone();
+        for addr in &self.peers {
+            executor.spawn(p2p.add_peer("biadnet", PeerSource::Outgoing(addr.clone())).map(|_|())).expect("can not spawn task for peers");
         }
 
-        return KeepConnected { min_connections, connections, p2p,
-            dns: Vec::new(), earlier: HashSet::new(), db, waker: Arc::new(Mutex::new(None)), discovery, peers, test };
-    }
-}
-
-
-struct KeepConnected {
-    min_connections: usize,
-    connections: Vec<(SocketAddr, Box<dyn Future<Item=SocketAddr, Error=Error> + Send>)>,
-    p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>,
-    dns: Vec<SocketAddr>,
-    earlier: HashSet<SocketAddr>,
-    db: SharedDB,
-    waker: Arc<Mutex<Option<Waker>>>,
-    discovery: bool,
-    peers: Vec<SocketAddr>,
-    test: bool
-}
-
-// this task runs until it runs out of peers
-impl Future for KeepConnected {
-    type Item = ();
-    type Error = Never;
-
-    fn poll(&mut self, cx: &mut task::Context) -> Poll<Self::Item, Self::Error> {
+        let dns = seed(self.test);
         {
-            let mut waker = self.waker.lock().unwrap();
-            *waker = Some(cx.waker().clone());
-        }
-        // find a finished peers
-        let finished = self.connections.iter_mut().enumerate().filter_map(|(i, (_, c))| {
-            match c.poll(cx) {
-                Ok(Async::Pending) => None,
-                Ok(Async::Ready(address)) => {
-                    debug!("keep connected woke up to lost peer at {}", address);
-                    Some(i)
-                },
-                Err(e) => {
-                    debug!("keep connected woke up to error {:?}", e);
-                    Some(i)
-                }
-            }
-        }).collect::<Vec<_>>();
-        let mut n = 0;
-        for i in finished.iter() {
-            let (socket, _ ) = self.connections.remove(*i - n);
-            n += 1;
-            if !self.discovery && self.peers.contains(&socket) {
-                // attempt to re-connect to mandatory peers
-                self.connections.push((socket, self.p2p.add_peer("biadnet", PeerSource::Outgoing(socket))));
-            }
-        }
-        if self.discovery {
-            while self.connections.len() < self.min_connections {
-                if let Some(addr) = self.get_an_address() {
-                    self.connections.push((addr, self.p2p.add_peer("biadnet", PeerSource::Outgoing(addr))));
-                } else {
-                    warn!("Want to connect to {} biadnet peers but have found only {}", self.min_connections, self.connections.len());
-                    break;
-                }
-            }
-        }
-        return Ok(Async::Pending);
-    }
-}
-
-impl KeepConnected {
-    fn get_an_address(&mut self) -> Option<SocketAddr> {
-        if let Ok(Some(a)) = self.db.lock().unwrap().transaction().get_an_address("biadnet", &self.earlier) {
-            self.earlier.insert(a);
-            return Some(a);
-        }
-        if self.dns.len() == 0 {
-            self.dns = seed(self.test);
             let mut db = self.db.lock().unwrap();
             let mut tx = db.transaction();
-            for a in &self.dns {
-                let now = SystemTime::now().duration_since(
-                    SystemTime::UNIX_EPOCH).unwrap().as_secs();
-                tx.store_address("biadnet", a, 0, now, 0).expect("can not store addresses in db");
+            for a in &dns {
+                tx.store_address("biadnet", a, 0, 0, 0).expect("can not store addresses in db");
             }
             tx.commit();
         }
-        if self.dns.len() > 0 {
-            let eligible = self.dns.iter().filter(|a| !self.earlier.contains(a)).cloned().collect::<Vec<_>>();
-            if eligible.len() > 0 {
-                let mut rng = thread_rng();
-                let choice = eligible[(rng.next_u32() as usize) % eligible.len()];
-                self.earlier.insert(choice.clone());
-                return Some(choice);
+
+        let keep_connected = KeepConnected {
+            min_connections: self.connections,
+            p2p: p2p.clone(),
+            earlier: HashSet::new(),
+            db: self.db.clone(),
+            dns,
+            cex: executor.clone()
+        };
+        executor.spawn(Interval::new(Duration::new(10, 0)).for_each(move |_| keep_connected.clone())).expect("can not keep connected");
+
+        let p2p = p2p.clone();
+        let mut cex = executor.clone();
+        executor.spawn(future::poll_fn(move |_| {
+            let needed_services = 0;
+            p2p.poll_events("biadnet", needed_services, &mut cex);
+            Async::Ready(())
+        })).expect("can not spawn biadnet event loop");
+    }
+}
+
+#[derive(Clone)]
+struct KeepConnected {
+    cex: ThreadPool,
+    dns: Vec<SocketAddr>,
+    db: SharedDB,
+    earlier: HashSet<SocketAddr>,
+    p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>,
+    min_connections: usize
+}
+
+impl Future for KeepConnected {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Async<Self::Output> {
+        if self.p2p.connected_peers() < self.min_connections {
+            let choice;
+            {
+                choice = self.db.lock().unwrap().transaction().get_an_address("biadnet", &self.earlier).expect("can not read addresses from db")
+            }
+            if let Some(choice) = choice {
+                self.earlier.insert(choice);
+                let add = self.p2p.add_peer("biadnet", PeerSource::Outgoing(choice)).map(|_| ());
+                self.cex.spawn(add).expect("can not add peer for outgoing connection");
+            }
+            else {
+                let eligible = self.dns.iter().cloned().filter(|a| !self.earlier.contains(a)).collect::<Vec<_>>();
+                if eligible.len() > 0 {
+                    let mut rng = thread_rng();
+                    let choice = eligible[(rng.next_u32() as usize) % eligible.len()];
+                    self.earlier.insert(choice.clone());
+                    let add = self.p2p.add_peer("biadnet", PeerSource::Outgoing(choice)).map(|_| ());
+                    self.cex.spawn(add).expect("can not add peer for outgoing connection");
+                }
             }
         }
-        None
+        Async::Ready(())
     }
 }
 

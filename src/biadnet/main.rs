@@ -25,7 +25,7 @@ use clap::{Arg, App};
 use simplelog;
 
 use futures::{
-    future, Never,
+    future,
     executor::ThreadPoolBuilder
 };
 
@@ -35,7 +35,6 @@ use biadne::p2p_biadnet::P2PBiadNet;
 use biadne::db::DB;
 use biadne::store::ContentStore;
 use biadne::wallet::{Wallet, KEY_LOOK_AHEAD};
-use futures::future::Empty;
 use murmel::chaindb::ChainDB;
 
 use std::net::SocketAddr;
@@ -338,5 +337,5 @@ pub fn main () {
                     content_store.clone(), config.birth).start(&mut thread_pool);
     P2PBiadNet::new(biadnet_connections, biadnet_peers, biadnet_listen, biadnet_discovery, db.clone(),
                     content_store.clone(), bitcoin_network != Network::Bitcoin).start(&mut thread_pool);
-    thread_pool.run::<Empty<(), Never>>(future::empty()).unwrap();
+    thread_pool.run(future::pending::<()>());
 }
