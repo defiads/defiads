@@ -251,6 +251,7 @@ impl ContentStore {
         let mut deleted_some = false;
         let mut db = self.db.lock().unwrap();
         let mut tx = db.transaction();
+        tx.store_processed(&header.prev_blockhash)?;
         for key in &mut tx.delete_confirmed(&header.bitcoin_hash())? {
             debug!("delete un-confirmed content {}", sha256::Hash::from_slice(&key.digest[..]).unwrap());
             for (_, i) in &mut self.iblts {
