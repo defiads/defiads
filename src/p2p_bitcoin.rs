@@ -154,8 +154,10 @@ impl P2PBitcoin {
         dispatcher.add_listener(sendtx.clone());
         self.content_store.write().unwrap().set_tx_sender(sendtx);
 
+        let mut earlier = HashSet::new();
         let p2p = p2p.clone();
         for addr in &self.peers {
+            earlier.insert(addr.clone());
             executor.spawn(p2p.add_peer("bitcoin", PeerSource::Outgoing(addr.clone())).map(|_|())).expect("can not spawn task for peers");
         }
 
@@ -172,7 +174,7 @@ impl P2PBitcoin {
         let keep_connected = KeepConnected {
             min_connections: self.connections,
             p2p: p2p.clone(),
-            earlier: HashSet::new(),
+            earlier,
             db: self.db.clone(),
             dns,
             cex: executor.clone()

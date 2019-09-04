@@ -234,8 +234,10 @@ impl P2PBiadNet {
             p2p_control.send(P2PControl::Bind(addr.clone()));
         }
 
+        let mut earlier = HashSet::new();
         let p2p = p2p.clone();
         for addr in &self.peers {
+            earlier.insert(addr.clone());
             executor.spawn(p2p.add_peer("biadnet", PeerSource::Outgoing(addr.clone())).map(|_|())).expect("can not spawn task for peers");
         }
 
@@ -252,7 +254,7 @@ impl P2PBiadNet {
         let keep_connected = KeepConnected {
             min_connections: self.connections,
             p2p: p2p.clone(),
-            earlier: HashSet::new(),
+            earlier,
             db: self.db.clone(),
             dns,
             cex: executor.clone()
