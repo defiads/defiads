@@ -65,6 +65,7 @@ use crate::trunk::Trunk;
 use crate::blockdownload::BlockDownload;
 use crate::sendtx::SendTx;
 use std::pin::Pin;
+use std::net::IpAddr;
 
 
 const MAX_PROTOCOL_VERSION: u32 = 70001;
@@ -157,7 +158,7 @@ impl P2PBitcoin {
         let mut earlier = HashSet::new();
         let p2p = p2p.clone();
         for addr in &self.peers {
-            earlier.insert(addr.clone());
+            earlier.insert(addr.ip());
             executor.spawn(p2p.add_peer("bitcoin", PeerSource::Outgoing(addr.clone())).map(|_|())).expect("can not spawn task for peers");
         }
 
@@ -196,7 +197,7 @@ struct KeepConnected {
     cex: ThreadPool,
     dns: Vec<SocketAddr>,
     db: SharedDB,
-    earlier: HashSet<SocketAddr>,
+    earlier: HashSet<IpAddr>,
     p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>,
     min_connections: usize
 }
@@ -211,16 +212,16 @@ impl Future for KeepConnected {
                choice = self.db.lock().unwrap().transaction().get_an_address("bitcoin", &self.earlier).expect("can not read addresses from db")
             }
             if let Some(choice) = choice {
-                self.earlier.insert(choice);
+                self.earlier.insert(choice.ip());
                 let add = self.p2p.add_peer("bitcoin", PeerSource::Outgoing(choice)).map(|_| ());
                 self.cex.spawn(add).expect("can not add peer for outgoing connection");
             }
             else {
-                let eligible = self.dns.iter().cloned().filter(|a| !self.earlier.contains(a)).collect::<Vec<_>>();
+                let eligible = self.dns.iter().cloned().filter(|a| !self.earlier.contains(&a.ip())).collect::<Vec<_>>();
                 if eligible.len() > 0 {
                     let mut rng = thread_rng();
                     let choice = eligible[(rng.next_u32() as usize) % eligible.len()];
-                    self.earlier.insert(choice.clone());
+                    self.earlier.insert(choice.ip());
                     let add = self.p2p.add_peer("bitcoin", PeerSource::Outgoing(choice)).map(|_| ());
                     self.cex.spawn(add).expect("can not add peer for outgoing connection");
                 }

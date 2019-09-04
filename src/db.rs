@@ -20,7 +20,7 @@ use bitcoin_hashes::{
 };
 use log::Level;
 use rusqlite::{Connection, Transaction, ToSql, OptionalExtension};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, IpAddr};
 use std::hash::Hasher;
 use crate::byteorder::ByteOrder;
 use crate::error::Error;
@@ -696,7 +696,7 @@ impl<'db> TX<'db> {
     // get an address not banned during the last day
     // the probability to be selected is exponentially higher for those with higher last_seen time
     // TODO mark tried connections, build slots instead of storing all. Replace only if not tried for long or banned
-    pub fn get_an_address(&self, network: &str, other_than: &HashSet<SocketAddr>) -> Result<Option<SocketAddr>, Error> {
+    pub fn get_an_address(&self, network: &str, other_than: &HashSet<IpAddr>) -> Result<Option<SocketAddr>, Error> {
         const BAN_TIME: u64 = 60*60*24; // a day
 
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
@@ -711,7 +711,7 @@ impl<'db> TX<'db> {
                 Ok(addr) })?
             .filter_map(|socket|
                 match socket {
-                    Ok(a) => if !other_than.contains(&a) { Some(a)} else {None},
+                    Ok(a) => if !other_than.contains(&a.ip()) { Some(a)} else {None},
                     Err(_) =>   None }).collect::<Vec<_>>();
         let len = eligible.len();
         if len == 0 {
@@ -835,7 +835,7 @@ mod test {
         {
             let addr = SocketAddr::from_str("127.0.0.1:8444").unwrap();
             let mut seen = HashSet::new();
-            seen.insert (addr);
+            seen.insert (addr.ip());
 
             let mut tx = db.transaction();
             tx.create_tables();
