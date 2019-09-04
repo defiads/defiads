@@ -124,7 +124,7 @@ impl Updater {
                                         for entry in iblt.into_iter() {
                                             if let Ok(entry) = entry {
                                                 match entry {
-                                                    IBLTEntry::Deleted(key) =>
+                                                    IBLTEntry::Inserted(key) =>
                                                         request.push(sha256::Hash::from_slice(&key.digest[..]).unwrap()),
                                                     _ => {}
                                                 };

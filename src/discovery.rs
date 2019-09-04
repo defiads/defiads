@@ -137,7 +137,7 @@ impl Discovery {
                                 for entry in iblt.into_iter() {
                                     if let Ok(entry) = entry {
                                         match entry {
-                                            IBLTEntry::Deleted(addr) => {
+                                            IBLTEntry::Inserted(addr) => {
                                                 if let Ok(addr) = addr.socket_address() {
                                                     debug!("Received and stored new address {} from peer={}", addr, pid);
                                                     tx.store_address("biadnet", &addr, 0, now, 0).expect("can not store addresses");
