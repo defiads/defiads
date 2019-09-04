@@ -19,7 +19,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 
 pub const BIADNET_PORT: u16 = 21766;
 
-const SEEDER: [&str;1] = ["biad.network"];
+const SEEDER: [&str;0] = [];
 
 pub fn seed (test: bool) -> Vec<SocketAddr> {
     let mut seeds = Vec::new ();

@@ -12,6 +12,10 @@ $ cargo build --release
 ```
 $ target/release/biadnet
 ```
+
+Databases and configuration will be stored in $HOME/.biadnet/bitcoin or $HOME/.biadnet/testnet depending on the 
+--bitcoin-network option
+
 ## Options
 ```
 USAGE:
