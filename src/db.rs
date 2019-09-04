@@ -173,7 +173,7 @@ impl<'db> TX<'db> {
     pub fn read_publication(&self, id: &sha256::Hash) -> Result<Option<Ad>, Error> {
         Ok(self.tx.query_row(r#"
             select cat, abs, ad from publication where id = ?1
-        "#, &[&id.to_string() as &ToSql], |r| {
+        "#, &[&id.to_string() as &dyn ToSql], |r| {
             Ok(Ad::new(
                 r.get_unwrap::<usize, String>(0),
                 r.get_unwrap::<usize, String>(1),
@@ -202,14 +202,14 @@ impl<'db> TX<'db> {
         self.tx.execute (r#"
             insert or replace into publication (id, cat, abs, ad, length)
             values (?1, ?2, ?3, ?4, ?5)
-        "#, &[&id.to_string() as &ToSql, &a.cat, &a.abs, &a.content.as_string().expect("can not decompress ad content"), &length])?;
+        "#, &[&id.to_string() as &dyn ToSql, &a.cat, &a.abs, &a.content.as_string().expect("can not decompress ad content"), &length])?;
         Ok(id)
     }
 
     pub fn rescan(&mut self, after: &sha256d::Hash) -> Result<(), Error> {
         self.tx.execute(r#"
             update processed set block = ?1
-        "#, &[&after.to_string() as &ToSql])?;
+        "#, &[&after.to_string() as &dyn ToSql])?;
         self.tx.execute(r#"
             delete from txout
         "#, NO_PARAMS)?;
@@ -223,14 +223,14 @@ impl<'db> TX<'db> {
         if let Some((publisher, id, term)) = funding {
             self.tx.execute(r#"
             insert or replace into txout (txid, tx, publisher, id, term) values (?1, ?2, ?3, ?4, ?5)
-        "#, &[&tx.txid().to_string() as &ToSql,
+        "#, &[&tx.txid().to_string() as &dyn ToSql,
                 &serialize(tx),
                 &publisher.to_bytes(), &id.to_string(), &term])?;
         }
         else {
             self.tx.execute(r#"
             insert or replace into txout (txid, tx) values (?1, ?2)
-        "#, &[&tx.txid().to_string() as &ToSql,
+        "#, &[&tx.txid().to_string() as &dyn ToSql,
                 &serialize(tx)])?;
         }
         Ok(())
@@ -287,7 +287,7 @@ impl<'db> TX<'db> {
             let k1 = thread_rng().next_u64();
             self.tx.execute(r#"
                 insert or replace into seed (rowid, k0, k1) values (1, ?1, ?2)
-            "#, &[&(k0 as i64) as &ToSql, &(k1 as i64)])?;
+            "#, &[&(k0 as i64) as &dyn ToSql, &(k1 as i64)])?;
             return Ok((k0, k1));
         }
     }
@@ -302,7 +302,7 @@ impl<'db> TX<'db> {
     pub fn store_processed(&mut self, block_id: &sha256d::Hash) -> Result<(), Error> {
         self.tx.execute(r#"
             insert or replace into processed (rowid, block) values (1, ?1)
-        "#, &[&block_id.to_string() as &ToSql])?;
+        "#, &[&block_id.to_string() as &dyn ToSql])?;
         Ok(())
     }
 
@@ -320,16 +320,16 @@ impl<'db> TX<'db> {
             let tweak = if let Some(ref tweak) = coin.derivation.tweak { hex::encode(tweak) } else {"".to_string()};
 
             statement.execute(&[
-                &outpoint.txid.to_string() as &ToSql, &outpoint.vout,
+                &outpoint.txid.to_string() as &dyn ToSql, &outpoint.vout,
                 &(coin.output.value as i64), &coin.output.script_pubkey.to_bytes(),
                 &coin.derivation.account, &coin.derivation.sub, &coin.derivation.kix,
                 if tweak == "" {
                     &Null
                 } else {
-                    &tweak as &ToSql
+                    &tweak as &dyn ToSql
                 },
                 if let Some(ref csv) = coin.derivation.csv {
-                    csv as &ToSql
+                    csv as &dyn ToSql
                 }
                 else {
                     &Null
@@ -342,7 +342,7 @@ impl<'db> TX<'db> {
             if let Some(proof) = proofs.values().find(|p| p.get_transaction().txid() == unconfirmed.txid()) {
                 self.tx.execute (r#"
                     update txout set confirmed = ?1 where txid = ?2
-                "#, &[&proof.get_block_hash().to_string() as &ToSql, &proof.get_transaction().txid().to_string()])?;
+                "#, &[&proof.get_block_hash().to_string() as &dyn ToSql, &proof.get_transaction().txid().to_string()])?;
             }
         }
 
@@ -355,7 +355,7 @@ impl<'db> TX<'db> {
             select txid, vout, value, script, account, sub, kix, tweak, csv, proof from coins
         "#)?;
         let mut coins = Coins::new();
-        for r in query.query_map::<(OutPoint, Coin, ProvedTransaction),&[&ToSql],_> (NO_PARAMS, |r| {
+        for r in query.query_map::<(OutPoint, Coin, ProvedTransaction),&[&dyn ToSql],_> (NO_PARAMS, |r| {
             Ok((
                 OutPoint{ txid: sha256d::Hash::from_hex(r.get_unwrap::<usize, String>(0).as_str()).expect("transaction id not hex"),
                     vout: r.get_unwrap::<usize, u32>(1)},
@@ -415,7 +415,7 @@ impl<'db> TX<'db> {
         Ok(self.tx.execute(r#"
             insert or replace into account (account, address_type, sub, master, instantiated)
             values (?1, ?2, ?3, ?4, ?5)
-        "#, &[&account.account_number() as &ToSql,
+        "#, &[&account.account_number() as &dyn ToSql,
             &account.address_type().as_u32(), &account.sub_account_number(), &account.master_public().to_string(),
             &serde_cbor::ser::to_vec(&account.instantiated())?]
         )?)
@@ -425,7 +425,7 @@ impl<'db> TX<'db> {
         debug!("read account {}/{}", account_number, sub);
         Ok(self.tx.query_row(r#"
             select address_type, master, instantiated from account where account = ?1 and sub = ?2
-        "#, &[&account_number as &ToSql, &sub], |r| {
+        "#, &[&account_number as &dyn ToSql, &sub], |r| {
             Ok(Account::new_from_storage(
                 AccountAddressType::from_u32(r.get_unwrap::<usize, u32>(0)),
                 account_number,
@@ -445,7 +445,7 @@ impl<'db> TX<'db> {
         let mut query = self.tx.prepare(r#"
             select id from content
         "#)?;
-        for r in query.query_map::<String,&[&ToSql],_>(NO_PARAMS,
+        for r in query.query_map::<String,&[&dyn ToSql],_>(NO_PARAMS,
                                                               |r| Ok(r.get(0)?))? {
             if let Ok(id) = r {
                 iblt.insert(&ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..]));
@@ -458,7 +458,7 @@ impl<'db> TX<'db> {
         let mut query = self.tx.prepare(r#"
             select id from content
         "#)?;
-        let mut key_iterator = query.query_map::<String,&[&ToSql],_>(NO_PARAMS,
+        let mut key_iterator = query.query_map::<String,&[&dyn ToSql],_>(NO_PARAMS,
                                                      |r| Ok(r.get(0)?))?
             .filter_map(|r| if let Ok(id) = r {
                 Some(ContentKey::new(&sha256::Hash::from_hex(id.as_str()).unwrap()[..]))}else{None});
@@ -474,7 +474,7 @@ impl<'db> TX<'db> {
             select ip from address where network = ?1 and last_seen > ?2 and banned < ?2
         "#)?;
         let yesterday = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 24*60*60;
-        for r in query.query_map::<String,&[&ToSql],_>(
+        for r in query.query_map::<String,&[&dyn ToSql],_>(
             &[&("biadnet".to_string()) as &dyn ToSql, &(yesterday as i64)], |r| Ok(r.get(0)?))? {
             if let Ok(s) = r {
                 iblt.insert(&NetAddress::new(&SocketAddr::from_str(s.as_str()).expect("address stored in db should be parsable")));
@@ -488,7 +488,7 @@ impl<'db> TX<'db> {
             select ip from address where network = ?1 and last_seen > ?2 and banned < ?2
         "#)?;
         let yesterday = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 24*60*60;
-        let mut key_iterator = query.query_map::<String,&[&ToSql],_>(
+        let mut key_iterator = query.query_map::<String,&[&dyn ToSql],_>(
             &[&("biadnet".to_string()) as &dyn ToSql, &(yesterday as i64)], |r| Ok(r.get(0)?))?
             .filter_map(|r| if let Ok(s) = r {
                 Some(NetAddress::new(&SocketAddr::from_str(s.as_str()).expect("address stored in db should be parsable")))}else{None});
@@ -507,7 +507,7 @@ impl<'db> TX<'db> {
         Ok(self.tx.execute(r#"
             insert or replace into content (id, cat, abs, ad, block_id, height, proof, publisher, term, weight, length)
             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-        "#, &[&id.to_hex() as &ToSql,
+        "#, &[&id.to_hex() as &dyn ToSql,
             &c.ad.cat, &c.ad.abs, &c.ad.content.as_string().expect("can not decompress ad content"),
             &block_id.to_hex(), &height, &proof, &publisher, &c.term,
             &((amount / length as u64) as u32), &length]
@@ -552,7 +552,7 @@ impl<'db> TX<'db> {
             debug!("drop content due to strorage limit {}", id);
             self.tx.execute(r#"
                 delete from content where id = ?1
-                            "#, &[id as &ToSql])?;
+                            "#, &[id as &dyn ToSql])?;
         }
         Ok(keys)
     }
@@ -566,13 +566,13 @@ impl<'db> TX<'db> {
         "#, NO_PARAMS)?;
         self.tx.execute(r#"
             insert into temp.ids (id) select id from content where height + term <= ?1
-        "#, &[&height as &ToSql])?;
+        "#, &[&height as &dyn ToSql])?;
 
         let mut query = self.tx.prepare(r#"
             select id from temp.ids
         "#)?;
 
-        for r in query.query_map::<String,&[&ToSql],_>(NO_PARAMS,
+        for r in query.query_map::<String,&[&dyn ToSql],_>(NO_PARAMS,
                                                                |r| Ok(r.get(0)?))? {
             if let Ok(id) = r {
                 keys.push(ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..]));
@@ -608,13 +608,13 @@ impl<'db> TX<'db> {
         "#, NO_PARAMS)?;
         self.tx.execute(r#"
             insert into temp.ids (id) select id from content where block_id = ?1
-        "#, &[&block_id.to_hex() as &ToSql])?;
+        "#, &[&block_id.to_hex() as &dyn ToSql])?;
 
         let mut query = self.tx.prepare(r#"
             select id from temp.ids
         "#)?;
 
-        for r in query.query_map::<String,&[&ToSql],_>(NO_PARAMS,
+        for r in query.query_map::<String,&[&dyn ToSql],_>(NO_PARAMS,
                                                               |r| Ok(r.get(0)?))? {
             if let Ok(id) = r {
                 keys.push(ContentKey::new(&sha256::Hash::from_hex(id.as_str())?[..]));
@@ -704,7 +704,7 @@ impl<'db> TX<'db> {
             select ip from address where network = ?2 and banned < ?1 order by last_seen desc
         "#)?;
         let eligible = statement.query_map::<SocketAddr, _, _>(
-            &[&((now - BAN_TIME) as i64) as &ToSql, &network.to_string()],
+            &[&((now - BAN_TIME) as i64) as &dyn ToSql, &network.to_string()],
             |row| {
                 let s = row.get_unwrap::<usize, String>(0);
                 let addr = SocketAddr::from_str(s.as_str()).expect("address stored in db should be parsable");
@@ -746,7 +746,7 @@ impl<'db> TX<'db> {
         for c in &cats {
             self.tx.execute(r#"
                 insert into temp.cats (cat) values(?1)
-            "#, &[c as &ToSql])?;
+            "#, &[c as &dyn ToSql])?;
         }
         let mut statement = self.tx.prepare(r#"
             select id, cat, abs from content where cat in (select cat from temp.cats) order by cat, weight desc
@@ -774,7 +774,7 @@ impl<'db> TX<'db> {
         for id in &ids {
             self.tx.execute(r#"
                 insert into temp.ids (id) values (?1)
-            "#, &[id as &ToSql]).unwrap();
+            "#, &[id as &dyn ToSql]).unwrap();
         }
 
         let mut statement = self.tx.prepare(r#"
