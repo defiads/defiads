@@ -623,7 +623,7 @@ impl<'db> TX<'db> {
 
         if log_enabled!(Level::Debug) {
             let mut statement = self.tx.prepare(r#"
-                select ip from temp.ids
+                select id from temp.ids
             "#)?;
             for id in statement
                 .query_map(NO_PARAMS, |r| Ok(r.get_unwrap::<usize, String>(0)))? {
