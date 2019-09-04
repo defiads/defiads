@@ -128,24 +128,12 @@ pub fn main () {
             .use_delimiter(true)
             .default_value(biadnet_listen.as_str())
             .min_values(1))
-        .arg(Arg::with_name("db")
-            .value_name("FILE")
-            .long("db")
-            .help("Database name")
-            .takes_value(true)
-            .default_value("biadnet.db"))
         .arg(Arg::with_name("storage-limit")
             .value_name("n")
             .long("storage-limit")
             .help("Storage limit in GB")
             .takes_value(true)
             .default_value("1"))
-        .arg(Arg::with_name("config")
-            .value_name("FILE")
-            .long("config")
-            .help("Configuration file in .toml format")
-            .takes_value(true)
-            .default_value("biadnet.cfg"))
         .arg(Arg::with_name("bitcoin-discovery")
             .long("bitcoin-discovery")
             .help("Enable/Disable bitcoin network discovery")
@@ -232,7 +220,7 @@ pub fn main () {
             }).collect();
 
     let mut db_path = workdir.clone();
-    db_path.push(matches.value_of("db").unwrap());
+    db_path.push("biadnet.db");
 
     let mut db = DB::new(db_path.as_path()).expect("can not open db");
     {
@@ -244,7 +232,7 @@ pub fn main () {
     let storage_limit = matches.value_of("storage-limit").unwrap().parse::<u64>().expect("expecting number of GB") * 1000*1000;
 
     let mut config_path = workdir.clone();
-    config_path.push(matches.value_of("config").unwrap());
+    config_path.push("biadnet.cfg");
 
     let mut bitcoin_wallet;
     let config;
