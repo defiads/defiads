@@ -92,7 +92,7 @@ impl P2PConfig<Message, Envelope> for BiadnetP2PConfig {
                 nonce: self.nonce,
                 timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
                 start_height: 0, // TODO
-                user_agent: "biadnet 0.1.0".to_string(),
+                user_agent: "defiads 0.1.0".to_string(),
                 receiver: NetAddress::new(remote),
                 sender: NetAddress::default(), // TODO
             }
@@ -211,7 +211,7 @@ impl P2PBiadNet {
         let p2pconfig = BiadnetP2PConfig {
             nonce: thread_rng().next_u64(),
             max_protocol_version: MAX_PROTOCOL_VERSION,
-            user_agent: "biadnet 0.1.0".to_string(),
+            user_agent: "defiads 0.1.0".to_string(),
             server: false
         };
 
@@ -239,7 +239,7 @@ impl P2PBiadNet {
         let p2p = p2p.clone();
         for addr in &self.peers {
             earlier.insert(addr.ip());
-            executor.spawn(p2p.add_peer("biadnet", PeerSource::Outgoing(addr.clone())).map(|_|())).expect("can not spawn task for peers");
+            executor.spawn(p2p.add_peer("defiads", PeerSource::Outgoing(addr.clone())).map(|_|())).expect("can not spawn task for peers");
         }
 
         let dns = seed(self.test);
@@ -247,7 +247,7 @@ impl P2PBiadNet {
             let mut db = self.db.lock().unwrap();
             let mut tx = db.transaction();
             for a in &dns {
-                tx.store_address("biadnet", a, 0, 0, 0).expect("can not store addresses in db");
+                tx.store_address("defiads", a, 0, 0, 0).expect("can not store addresses in db");
             }
             tx.commit();
         }
@@ -266,9 +266,9 @@ impl P2PBiadNet {
         let mut cex = executor.clone();
         executor.spawn(future::poll_fn(move |_| {
             let needed_services = 0;
-            p2p.poll_events("biadnet", needed_services, &mut cex);
+            p2p.poll_events("defiads", needed_services, &mut cex);
             Async::Ready(())
-        })).expect("can not spawn biadnet event loop");
+        })).expect("can not spawn defiads event loop");
     }
 }
 
@@ -289,11 +289,11 @@ impl Future for KeepConnected {
         if self.p2p.connected_peers() < self.min_connections {
             let choice;
             {
-                choice = self.db.lock().unwrap().transaction().get_an_address("biadnet", &self.earlier).expect("can not read addresses from db")
+                choice = self.db.lock().unwrap().transaction().get_an_address("defiads", &self.earlier).expect("can not read addresses from db")
             }
             if let Some(choice) = choice {
                 self.earlier.insert(choice.ip());
-                let add = self.p2p.add_peer("biadnet", PeerSource::Outgoing(choice)).map(|_| ());
+                let add = self.p2p.add_peer("defiads", PeerSource::Outgoing(choice)).map(|_| ());
                 self.cex.spawn(add).expect("can not add peer for outgoing connection");
             }
             else {
@@ -302,7 +302,7 @@ impl Future for KeepConnected {
                     let mut rng = thread_rng();
                     let choice = eligible[(rng.next_u32() as usize) % eligible.len()];
                     self.earlier.insert(choice.ip());
-                    let add = self.p2p.add_peer("biadnet", PeerSource::Outgoing(choice)).map(|_| ());
+                    let add = self.p2p.add_peer("defiads", PeerSource::Outgoing(choice)).map(|_| ());
                     self.cex.spawn(add).expect("can not add peer for outgoing connection");
                 }
             }
@@ -337,7 +337,7 @@ impl AddressPoolMaintainer {
                         debug!("store successful connection to {} peer={}", &address, pid);
                         let now = SystemTime::now().duration_since(
                             SystemTime::UNIX_EPOCH).unwrap().as_secs();
-                        tx.store_address("biadnet", &address, now, now, 0).unwrap();
+                        tx.store_address("defiads", &address, now, now, 0).unwrap();
                         tx.commit();
                     }
                 }
@@ -349,7 +349,7 @@ impl AddressPoolMaintainer {
                             let now = SystemTime::now().duration_since(
                                 SystemTime::UNIX_EPOCH).unwrap().as_secs();
                             debug!("store ban of {} peer={}", &address, pid);
-                            tx.store_address("biadnet", &address, 0, 0, now).unwrap();
+                            tx.store_address("defiads", &address, 0, 0, now).unwrap();
                             tx.commit();
                         }
                     }

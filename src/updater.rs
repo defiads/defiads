@@ -165,7 +165,7 @@ impl Updater {
                                 debug!("received {} get requests from peer={}", ids.len(), pid);
                                 let store = self.store.read().unwrap();
                                 for id in &ids {
-                                    if let Ok(Some(content)) = store.get_content(id) {
+                                    if let Some(content) = store.get_content(id).expect("can not read content") {
                                         debug!("delivering content {} to peer={}", id, pid);
                                         self.p2p.send_network(pid, Message::Content(content));
                                     }
@@ -197,7 +197,7 @@ impl Updater {
                         self.timeout.lock().unwrap().expect(pid, 1, ExpectedReply::PollContent);
                     }
                     else {
-                        warn!("can not poll content as no biadnet peers are connected");
+                        warn!("can not poll content as no defiads peers are connected");
                     }
                 }
             }

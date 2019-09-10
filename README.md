@@ -1,6 +1,7 @@
 [![Safety Dance](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
 
-# Bitcoin Advertising Network
+# defiads Network
+A defiant ads network to meet the needs of decentralized finance (DeFi).
 
 # Build
 [Install Rust](https://www.rust-lang.org/learn/get-started)
@@ -10,27 +11,27 @@ $ cargo build --release
 ```
 # Run
 ```
-$ target/release/biadnet
+$ target/release/defiads
 ```
 
-Databases and configuration will be stored in $HOME/.biadnet/bitcoin or $HOME/.biadnet/testnet depending on the 
+Databases and configuration will be stored in $HOME/.defiads/bitcoin or $HOME/.defiads/testnet depending on the 
 --bitcoin-network option
 
 ## Options
 ```
 USAGE:
-    biadnet [OPTIONS]
+    defiads [OPTIONS]
 
 FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
-        --biadnet-connections <n>                  Desired number of connections to the biadnet network [default: 5]
-        --biadnet-discovery <biadnet-discovery>
-            Enable/Disable biadnet network discovery [default: ON]  [possible values: ON, OFF]
+        --defiads-connections <n>                  Desired number of connections to the defiads network [default: 5]
+        --defiads-discovery <defiads-discovery>
+            Enable/Disable defiads network discovery [default: ON]  [possible values: ON, OFF]
 
-        --biadnet-peers <ADDRESS>...               Biadnet network peers to connect
+        --defiads-peers <ADDRESS>...               defiads network peers to connect
         --bitcoin-connections <n>                  Desired number of connections to the bitcoin network [default: 5]
         --bitcoin-discovery <bitcoin-discovery>
             Enable/Disable bitcoin network discovery [default: ON]  [possible values: ON, OFF]
@@ -40,7 +41,7 @@ OPTIONS:
 
         --bitcoin-peers <ADDRESS>...               Bitcoin network peers to connect
         --http-rpc <ADDRESS>                       Listen to http-rpc on this address. [default: 127.0.0.1:21767]
-        --listen <ADDRESS>...                      Listen to incoming biadnet connections [default: 0.0.0.0:21766]
+        --listen <ADDRESS>...                      Listen to incoming defiads connections [default: 0.0.0.0:21766]
         --log-level <LEVEL>
             Set log level. [default: DEBUG]  [possible values: OFF, ERROR, WARN, INFO, DEBUG, TRACE]
 
@@ -49,11 +50,11 @@ OPTIONS:
 ```
 
 ## First Use
-At first use biadnet will generate a key for its bitcoin wallet. The key format follows that of popular wallets and is
+At first use defiads will generate a key for its bitcoin wallet. The key format follows that of popular wallets and is
 compatible with TREZOR, Ledger etc.
 
 The human readable representation of the key are 24 words. You should write them down and keep off-line. The same
-words are stored encrypted in the biadnet.cfg file. You set the encryption password at first use. Remember this as 
+words are stored encrypted in the defiads.cfg file. You set the encryption password at first use. Remember this as 
 there is no other way to recover the words from the encrypted storage.
 
 ## RPC API
@@ -64,7 +65,7 @@ curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method"
 
 ```
 Where the first argument is always an API Key which is unique to this installation. You find the API key in the
-biadnet.cfg file.  
+defiads.cfg file.  
 
 The second argument is the encryption key for methods that move bitcoins.
 

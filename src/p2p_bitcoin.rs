@@ -102,7 +102,7 @@ impl P2PBitcoin {
             nonce: thread_rng().next_u64(),
             network: self.network,
             max_protocol_version: MAX_PROTOCOL_VERSION,
-            user_agent: "biadnet 0.1.0".to_string(),
+            user_agent: "defiads 0.1.0".to_string(),
             server: false,
             height
         };

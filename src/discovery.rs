@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-//! BiadNet network discovery
+//! defiads network discovery
 
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6, SocketAddrV4};
 use std::io;
@@ -73,7 +73,7 @@ impl Discovery {
                             let mut db = self.db.lock().unwrap();
                             let mut tx = db.transaction();
                             debug!("store successful connection to {} peer={}", &address, pid);
-                            tx.store_address("biadnet", &address, now, now, 0).expect("can not store addresses");
+                            tx.store_address("defiads", &address, now, now, 0).expect("can not store addresses");
                         }
                         self.poll_address(pid);
                         last_polled = SystemTime::now();
@@ -140,7 +140,7 @@ impl Discovery {
                                             IBLTEntry::Inserted(addr) => {
                                                 if let Ok(addr) = addr.socket_address() {
                                                     debug!("Received and stored new address {} from peer={}", addr, pid);
-                                                    tx.store_address("biadnet", &addr, 0, now, 0).expect("can not store addresses");
+                                                    tx.store_address("defiads", &addr, 0, now, 0).expect("can not store addresses");
                                                 }
                                             }
                                             _ => {}

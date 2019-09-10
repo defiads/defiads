@@ -30,26 +30,26 @@ use futures::{
 };
 
 use bitcoin::network::constants::Network;
-use biadne::p2p_bitcoin::{ChainDBTrunk, P2PBitcoin};
-use biadne::p2p_biadnet::P2PBiadNet;
-use biadne::db::DB;
-use biadne::store::ContentStore;
-use biadne::wallet::{Wallet, KEY_LOOK_AHEAD};
+use defiads::p2p_bitcoin::{ChainDBTrunk, P2PBitcoin};
+use defiads::p2p_biadnet::P2PBiadNet;
+use defiads::db::DB;
+use defiads::store::ContentStore;
+use defiads::wallet::{Wallet, KEY_LOOK_AHEAD};
 use murmel::chaindb::ChainDB;
 
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::{Arc,RwLock, Mutex};
 use std::thread;
-use biadne::api::start_api;
+use defiads::api::start_api;
 use std::fs;
 use rand::{thread_rng, RngCore};
 use log_panics;
-use biadne::find_peers::BIADNET_PORT;
+use defiads::find_peers::BIADNET_PORT;
 use bitcoin::util::bip32::ExtendedPubKey;
 use bitcoin_wallet::account::{MasterAccount};
 use bitcoin::BitcoinHash;
-use biadne::trunk::Trunk;
+use defiads::trunk::Trunk;
 
 const HTTP_RPC: &str = "127.0.0.1";
 const BIADNET_LISTEN: &str = "0.0.0.0"; // this also implies ipv6 [::]
@@ -69,7 +69,7 @@ pub fn main () {
     let biadnet_listen = (BIADNET_LISTEN.to_string() + ":") + (BIADNET_PORT.to_string().as_str());
     let http_rpc = (HTTP_RPC.to_string() + ":") + ((BIADNET_PORT + 1).to_string().as_str());
 
-    let matches = App::new("biadnet").version("0.1.0").author("tamas.blummer@protonmail.com")
+    let matches = App::new("defiads").version("0.1.0").author("tamas.blummer@protonmail.com")
         .about("Bitcoin Advertizing Network")
         .arg(Arg::with_name("log-level")
             .long("log-level")
@@ -91,10 +91,10 @@ pub fn main () {
             .long("bitcoin-connections")
             .help("Desired number of connections to the bitcoin network")
             .takes_value(true).default_value("5"))
-        .arg(Arg::with_name("biadnet-connections")
+        .arg(Arg::with_name("defiads-connections")
             .value_name("n")
-            .long("biadnet-connections")
-            .help("Desired number of connections to the biadnet network")
+            .long("defiads-connections")
+            .help("Desired number of connections to the defiads network")
             .takes_value(true).default_value("5"))
         .arg(Arg::with_name("bitcoin-peers")
             .long("bitcoin-peers")
@@ -104,10 +104,10 @@ pub fn main () {
             .use_delimiter(true)
             .min_values(1)
             .takes_value(true))
-        .arg(Arg::with_name("biadnet-peers")
-            .long("biadnet-peers")
+        .arg(Arg::with_name("defiads-peers")
+            .long("defiads-peers")
             .value_name("ADDRESS")
-            .help("Biadnet network peers to connect")
+            .help("defiads network peers to connect")
             .multiple(true)
             .use_delimiter(true)
             .min_values(1)
@@ -123,7 +123,7 @@ pub fn main () {
             .long("listen")
             .value_name("ADDRESS")
             .multiple(true)
-            .help("Listen to incoming biadnet connections")
+            .help("Listen to incoming defiads connections")
             .takes_value(true)
             .use_delimiter(true)
             .default_value(biadnet_listen.as_str())
@@ -141,9 +141,9 @@ pub fn main () {
             .possible_values(&["ON", "OFF"])
             .case_insensitive(true)
             .default_value("ON"))
-        .arg(Arg::with_name("biadnet-discovery")
-            .long("biadnet-discovery")
-            .help("Enable/Disable biadnet network discovery")
+        .arg(Arg::with_name("defiads-discovery")
+            .long("defiads-discovery")
+            .help("Enable/Disable defiads network discovery")
             .takes_value(true)
             .possible_values(&["ON", "OFF"])
             .case_insensitive(true)
@@ -157,14 +157,14 @@ pub fn main () {
     let bitcoin_network = matches.value_of("bitcoin-network").unwrap().parse::<Network>().unwrap();
 
     let mut workdir = dirs::home_dir().expect("unknown home directory");
-    workdir.push(".biadnet");
+    workdir.push(".defiads");
     workdir.push(bitcoin_network.to_string());
     fs::DirBuilder::new().recursive(true).create(workdir.clone()).expect("can not create work directory");
 
 
     let level = log::LevelFilter::from_str(matches.value_of("log-level").unwrap()).unwrap();
     let mut log_file = workdir.clone();
-    log_file.push("biadnet.log");
+    log_file.push("defiads.log");
     let mut log_config = simplelog::Config::default();
     log_config.filter_ignore = Some(&["tokio", "hyper"]);
     simplelog::CombinedLogger::init(
@@ -173,14 +173,14 @@ pub fn main () {
             simplelog::WriteLogger::new(level, log_config, std::fs::File::create(log_file.clone()).unwrap()),
         ]
     ).unwrap();
-    eprintln!("Starting biadnet, connected to {} network.", bitcoin_network);
+    eprintln!("Starting defiads, connected to {} network.", bitcoin_network);
     eprintln!("Observe progress in the log file: {}", log_file.as_path().display());
     eprintln!("Warnings and errors will be also printed to stderr.");
-    info!("biadnet connects to {} network", bitcoin_network);
-    let mut biadnet_connections = matches.value_of("biadnet-connections").unwrap().parse::<usize>().unwrap();
+    info!("defiads connects to {} network", bitcoin_network);
+    let mut biadnet_connections = matches.value_of("defiads-connections").unwrap().parse::<usize>().unwrap();
     let mut bitcoin_connections = matches.value_of("bitcoin-connections").unwrap().parse::<usize>().unwrap();
 
-    let biadnet_peers = matches.values_of("biadnet-peers").unwrap_or_default().map(
+    let biadnet_peers = matches.values_of("defiads-peers").unwrap_or_default().map(
         |s| SocketAddr::from_str(s).expect("invalid socket address")).collect::<Vec<SocketAddr>>();
 
     let bitcoin_peers = matches.values_of("bitcoin-peers").unwrap_or_default().map(
@@ -194,10 +194,10 @@ pub fn main () {
         bitcoin_connections = bitcoin_peers.len();
     }
 
-    let biadnet_discovery = matches.value_of("biadnet-discovery").unwrap().eq_ignore_ascii_case("ON");
+    let biadnet_discovery = matches.value_of("defiads-discovery").unwrap().eq_ignore_ascii_case("ON");
     if biadnet_discovery == false  {
         if biadnet_peers.len() == 0 {
-            panic!("You have to provide biadnet-peers or enable biadnet-discovery");
+            panic!("You have to provide defiads-peers or enable defiads-discovery");
         }
         biadnet_connections = biadnet_peers.len();
     }
@@ -220,7 +220,7 @@ pub fn main () {
             }).collect();
 
     let mut db_path = workdir.clone();
-    db_path.push("biadnet.db");
+    db_path.push("defiads.db");
 
     let mut db = DB::new(db_path.as_path()).expect("can not open db");
     {
@@ -232,7 +232,7 @@ pub fn main () {
     let storage_limit = matches.value_of("storage-limit").unwrap().parse::<u64>().expect("expecting number of GB") * 1000*1000;
 
     let mut config_path = workdir.clone();
-    config_path.push("biadnet.cfg");
+    config_path.push("defiads.cfg");
 
     let mut bitcoin_wallet;
     let config;

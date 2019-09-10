@@ -61,7 +61,7 @@ pub fn start_api (rpc_address: &SocketAddr, store: SharedContentStore, apikey: S
 
     // call endpoints with:
     // curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "METHOD", "params": ["apikey", "ARGUMENTS"...] "id":1}' 127.0.0.1:21767
-    // see biadnet.cfg for apikey
+    // see defiads.cfg for apikey
 
 
     // list known categories

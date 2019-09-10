@@ -1,12 +1,12 @@
 [package]
-name = "biadne"
+name = "defiads"
 version = "0.1.0"
 authors = ["Tamas Blummer <tamas.blummer@gmail.com>"]
 edition = "2018"
 
 [[bin]]
-name="biadnet"
-path="src/biadnet/main.rs"
+name="defiads"
+path="src/defiads/main.rs"
 
 [dependencies]
 snap = "0.2"

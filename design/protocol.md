@@ -1,5 +1,5 @@
 # P2P protocol
-Messages and associated workflows of the biadne network.
+Messages and associated workflows of the defiads network.
 
 ## Encoding
 P2P messages are encoded as defined in CBOR, seee RFC 

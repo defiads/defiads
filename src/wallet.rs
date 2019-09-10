@@ -286,13 +286,13 @@ impl Wallet {
         master.add_account(commitments);
         let receiver = master.get((0,0)).unwrap().get_key(0).unwrap().address.clone();
         eprintln!();
-        eprintln!("You will need the encryption password to use the funds with biadnet.");
+        eprintln!("You will need the encryption password to use the funds with defiads.");
         eprintln!();
         eprintln!("Uncommitted funds in the wallet can also be accessed with programs and devices");
         eprintln!("compatible with BIP32, BIP39, BIP44, BIP49, BIP84, such as TREZOR or Ledger");
         eprintln!();
         eprintln!("Write down the following human readable key,");
-        eprintln!("to evtl. restore your biadnet wallet or import into compatible programs and devices.");
+        eprintln!("to evtl. restore your defiads wallet or import into compatible programs and devices.");
         eprintln!();
         for (i, word) in master.mnemonic(password.as_str()).unwrap().iter().enumerate() {
             eprintln!("{} {}", i+1, word);

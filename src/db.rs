@@ -475,7 +475,7 @@ impl<'db> TX<'db> {
         "#)?;
         let yesterday = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 24*60*60;
         for r in query.query_map::<String,&[&dyn ToSql],_>(
-            &[&("biadnet".to_string()) as &dyn ToSql, &(yesterday as i64)], |r| Ok(r.get(0)?))? {
+            &[&("defiads".to_string()) as &dyn ToSql, &(yesterday as i64)], |r| Ok(r.get(0)?))? {
             if let Ok(s) = r {
                 iblt.insert(&NetAddress::new(&SocketAddr::from_str(s.as_str()).expect("address stored in db should be parsable")));
             }
@@ -489,7 +489,7 @@ impl<'db> TX<'db> {
         "#)?;
         let yesterday = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 24*60*60;
         let mut key_iterator = query.query_map::<String,&[&dyn ToSql],_>(
-            &[&("biadnet".to_string()) as &dyn ToSql, &(yesterday as i64)], |r| Ok(r.get(0)?))?
+            &[&("defiads".to_string()) as &dyn ToSql, &(yesterday as i64)], |r| Ok(r.get(0)?))?
             .filter_map(|r| if let Ok(s) = r {
                 Some(NetAddress::new(&SocketAddr::from_str(s.as_str()).expect("address stored in db should be parsable")))}else{None});
 
@@ -520,7 +520,7 @@ impl<'db> TX<'db> {
             from content where id = ?1
         "#, &[digest.to_hex()], |r| Ok(
             Some(Content {
-                ad: Ad::new(r.get_unwrap::<usize, String>(0), r.get_unwrap::<usize, String>(1), r.get_unwrap::<usize, String>(2).as_str()),
+                ad: Ad::new(r.get_unwrap(0), r.get_unwrap(1), r.get_unwrap::<usize, String>(2).as_str()),
                 funding: serde_cbor::from_reader(std::io::Cursor::new(r.get_unwrap::<usize, Vec<u8>>(3))).unwrap(),
                 funder: serde_cbor::from_reader(std::io::Cursor::new(r.get_unwrap::<usize, Vec<u8>>(4))).unwrap(),
                 term: r.get_unwrap(5)
@@ -840,18 +840,18 @@ mod test {
             let mut tx = db.transaction();
             tx.create_tables();
             // store address
-            tx.store_address("biadnet", &addr, 0, 0, 0).unwrap();
+            tx.store_address("defiads", &addr, 0, 0, 0).unwrap();
             // update
-            tx.store_address("biadnet", &addr, 0, 1, 1).unwrap();
+            tx.store_address("defiads", &addr, 0, 1, 1).unwrap();
             //find
-            tx.get_an_address("biadnet", &HashSet::new()).unwrap();
+            tx.get_an_address("defiads", &HashSet::new()).unwrap();
             // should not find if seen
-            assert!(tx.get_an_address("biadnet", &seen).unwrap().is_none());
+            assert!(tx.get_an_address("defiads", &seen).unwrap().is_none());
             // ban
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-            tx.store_address("biadnet", &SocketAddr::from_str("127.0.0.1:8444").unwrap(), 0, 1, now).unwrap();
+            tx.store_address("defiads", &SocketAddr::from_str("127.0.0.1:8444").unwrap(), 0, 1, now).unwrap();
             // should not find if banned
-            assert!(tx.get_an_address("biadnet", &HashSet::new()).unwrap().is_none());
+            assert!(tx.get_an_address("defiads", &HashSet::new()).unwrap().is_none());
 
             let mut master = MasterAccount::new(MasterKeyEntropy::Recommended, Network::Bitcoin, "", None).unwrap();
             let mut unlocker = Unlocker::new(master.encrypted().as_slice(), "", None, Network::Bitcoin, Some(master.master_public())).unwrap();

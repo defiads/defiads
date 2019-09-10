@@ -23,7 +23,7 @@ const SEEDER: [&str;0] = [];
 
 pub fn seed (test: bool) -> Vec<SocketAddr> {
     let mut seeds = Vec::new ();
-    info!("reaching out for biadnet seed...");
+    info!("reaching out for defiads seed...");
     for seedhost in SEEDER.iter() {
         if let Ok(lookup) = (*seedhost, BIADNET_PORT + if test {100} else {0}).to_socket_addrs() {
             for host in lookup {
@@ -33,6 +33,6 @@ pub fn seed (test: bool) -> Vec<SocketAddr> {
             trace!("{} did not answer", seedhost);
         }
     }
-    info!("received {} biadnet seeds", seeds.len());
+    info!("received {} defiads seeds", seeds.len());
     seeds
 }
