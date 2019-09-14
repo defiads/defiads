@@ -175,7 +175,7 @@ impl P2PBitcoin {
         let keep_connected = KeepConnected {
             min_connections: self.connections,
             p2p: p2p.clone(),
-            earlier,
+            earlier: Arc::new(Mutex::new(earlier)),
             db: self.db.clone(),
             dns,
             cex: executor.clone()
@@ -197,7 +197,7 @@ struct KeepConnected {
     cex: ThreadPool,
     dns: Vec<SocketAddr>,
     db: SharedDB,
-    earlier: HashSet<IpAddr>,
+    earlier: Arc<Mutex<HashSet<IpAddr>>>,
     p2p: Arc<P2P<NetworkMessage, RawNetworkMessage, BitcoinP2PConfig>>,
     min_connections: usize
 }
@@ -209,20 +209,20 @@ impl Future for KeepConnected {
         if self.p2p.n_connected_peers() < self.min_connections {
             let choice;
             {
-                self.p2p.connected_peers().iter().for_each(|a| {self.earlier.insert(a.ip());} );
-                choice = self.db.lock().unwrap().transaction().get_an_address("bitcoin", &self.earlier).expect("can not read addresses from db")
+                self.p2p.connected_peers().iter().for_each(|a| {self.earlier.lock().unwrap().insert(a.ip());} );
+                choice = self.db.lock().unwrap().transaction().get_an_address("bitcoin", self.earlier.clone()).expect("can not read addresses from db")
             }
             if let Some(choice) = choice {
-                self.earlier.insert(choice.ip());
+                self.earlier.lock().unwrap().insert(choice.ip());
                 let add = self.p2p.add_peer("bitcoin", PeerSource::Outgoing(choice)).map(|_| ());
                 self.cex.spawn(add).expect("can not add peer for outgoing connection");
             }
             else {
-                let eligible = self.dns.iter().cloned().filter(|a| !self.earlier.contains(&a.ip())).collect::<Vec<_>>();
+                let eligible = self.dns.iter().cloned().filter(|a| !self.earlier.lock().unwrap().contains(&a.ip())).collect::<Vec<_>>();
                 if eligible.len() > 0 {
                     let mut rng = thread_rng();
                     let choice = eligible[(rng.next_u32() as usize) % eligible.len()];
-                    self.earlier.insert(choice.ip());
+                    self.earlier.lock().unwrap().insert(choice.ip());
                     let add = self.p2p.add_peer("bitcoin", PeerSource::Outgoing(choice)).map(|_| ());
                     self.cex.spawn(add).expect("can not add peer for outgoing connection");
                 }

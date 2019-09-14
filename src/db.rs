@@ -696,13 +696,14 @@ impl<'db> TX<'db> {
     // get an address not banned during the last day
     // the probability to be selected is exponentially higher for those with higher last_seen time
     // TODO mark tried connections, build slots instead of storing all. Replace only if not tried for long or banned
-    pub fn get_an_address(&self, network: &str, other_than: &HashSet<IpAddr>) -> Result<Option<SocketAddr>, Error> {
+    pub fn get_an_address(&self, network: &str, other_than: Arc<Mutex<HashSet<IpAddr>>>) -> Result<Option<SocketAddr>, Error> {
         const BAN_TIME: u64 = 60*60*24; // a day
 
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
         let mut statement = self.tx.prepare(r#"
             select ip from address where network = ?2 and banned < ?1 order by last_seen desc
         "#)?;
+        let other_than = other_than.lock().unwrap();
         let eligible = statement.query_map::<SocketAddr, _, _>(
             &[&((now - BAN_TIME) as i64) as &dyn ToSql, &network.to_string()],
             |row| {
@@ -844,14 +845,14 @@ mod test {
             // update
             tx.store_address("defiads", &addr, 0, 1, 1).unwrap();
             //find
-            tx.get_an_address("defiads", &HashSet::new()).unwrap();
+            tx.get_an_address("defiads", Arc::new(Mutex::new(HashSet::new()))).unwrap();
             // should not find if seen
-            assert!(tx.get_an_address("defiads", &seen).unwrap().is_none());
+            assert!(tx.get_an_address("defiads", Arc::new(Mutex::new(seen))).unwrap().is_none());
             // ban
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
             tx.store_address("defiads", &SocketAddr::from_str("127.0.0.1:8444").unwrap(), 0, 1, now).unwrap();
             // should not find if banned
-            assert!(tx.get_an_address("defiads", &HashSet::new()).unwrap().is_none());
+            assert!(tx.get_an_address("defiads", Arc::new(Mutex::new(HashSet::new()))).unwrap().is_none());
 
             let mut master = MasterAccount::new(MasterKeyEntropy::Recommended, Network::Bitcoin, "", None).unwrap();
             let mut unlocker = Unlocker::new(master.encrypted().as_slice(), "", None, Network::Bitcoin, Some(master.master_public())).unwrap();
