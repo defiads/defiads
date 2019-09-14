@@ -516,7 +516,7 @@ impl<'db> TX<'db> {
 
     pub fn read_content(&self, digest: &sha256::Hash) -> Result<Option<Content>, Error> {
         Ok(self.tx.query_row(r#"
-            select (cat, abs, ad, proof, publisher, term)
+            select cat, abs, ad, proof, publisher, term
             from content where id = ?1
         "#, &[digest.to_hex()], |r| Ok(
             Some(Content {
