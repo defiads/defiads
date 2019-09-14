@@ -10,26 +10,29 @@ to the bitcoin network.
 Every defiads node maintains a copy of a network-wide shared 1GB memory pool of current ads.
 
 An ad is replicated to other nodes as long as there is some bitcoin locked to it on the bitcoin network.
-Locking means the owner of the bitcoins transferred them to an address that is cryptographically associated with the ad
+Locking means the owner of the bitcoins transferred some sats to an address that is cryptographically associated with the ad
 using the [pay-to-contract](https://arxiv.org/pdf/1212.3257.pdf) protocol. The address does not release the bitcoins
 until a predefined time span that is the duration of the advertizement, this is accomplished with [OP_CSV](https://github.com/bitcoin/bips/blob/master/bip-0112.mediawiki).
 
-defiads nodes rank advertizements by the ratio of length divided by bitcoins committed and will only replicate the top 1GB of this ranked list.
+defiads nodes rank advertizements by the ratio of length divided by bitcoins locked and will only replicate the top 1GB of this ranked list.
 
-You may read the ad pool by starting a defiads process of your own and the query the content through its JSON-RPC API.
+You may read the ads pool by starting a defiads process of your own and the query the content through its JSON-RPC API.
 
 You may place ads by performing the following steps, with the below documented JSON-RPC API
 1. deposit some bitcoins into your defiads node's wallet
 2. prepare an ad, providing its category, abstract and content
-3. fund the ad by locking some of your bitcoins to it for a limited term of the advertizement
+3. fund the ad by locking some of the bitcoins to it for a limited term of the advertizement
 4. you may withdraw your coins from the defiads node's wallet after the advertizement expires
 
 ## Implementation notes
 defiads connects to both the bitcoin and its own peer-to-peer network. You do not need to run a bitcoin node as
-defiads does only need a small fraction of the information on the bictoin blockchain and retrieves that on its own.
+defiads does only need a small fraction of the information on the bictoin blockchain and retrieves that on its own,
+as an SPV node.
 
 The defiads node's wallet is compatibe with that of TREZOR, Ledger, Greenwallet and many other wallets that support
 BIP38, BIP44, BIP48, BIP84 key generation and use standards.
+
+defiads uses [Invertible Bloom Lookup Tables](https://arxiv.org/pdf/1101.2245.pdf) to synchronize the ads pool with its peers.
 
 ## Status
 It seems to work, but you should not yet use with real bitcoins, therefore by default it connects the bitcoin's test network.
