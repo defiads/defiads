@@ -60,4 +60,4 @@ pub mod store;
 pub mod db;
 pub mod updater;
 pub mod p2p_bitcoin;
-pub mod p2p_biadnet;
+pub mod p2p_defiads;

@@ -206,10 +206,11 @@ impl Future for KeepConnected {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Async<Self::Output> {
-        if self.p2p.connected_peers() < self.min_connections {
+        if self.p2p.n_connected_peers() < self.min_connections {
             let choice;
             {
-               choice = self.db.lock().unwrap().transaction().get_an_address("bitcoin", &self.earlier).expect("can not read addresses from db")
+                self.p2p.connected_peers().iter().for_each(|a| {self.earlier.insert(a.ip());} );
+                choice = self.db.lock().unwrap().transaction().get_an_address("bitcoin", &self.earlier).expect("can not read addresses from db")
             }
             if let Some(choice) = choice {
                 self.earlier.insert(choice.ip());

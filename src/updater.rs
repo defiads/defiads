@@ -25,7 +25,7 @@ use std::thread;
 use std::time::Duration;
 use crate::store::SharedContentStore;
 use crate::messages::PollContentMessage;
-use crate::p2p_biadnet::ExpectedReply;
+use crate::p2p_defiads::ExpectedReply;
 use murmel::p2p::PeerId;
 use std::collections::HashMap;
 use crate::iblt::estimate_diff_size;

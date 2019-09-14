@@ -31,7 +31,7 @@ use futures::{
 
 use bitcoin::network::constants::Network;
 use defiads::p2p_bitcoin::{ChainDBTrunk, P2PBitcoin};
-use defiads::p2p_biadnet::P2PBiadNet;
+use defiads::p2p_defiads::P2PBiadNet;
 use defiads::db::DB;
 use defiads::store::ContentStore;
 use defiads::wallet::{Wallet, KEY_LOOK_AHEAD};

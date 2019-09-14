@@ -28,7 +28,7 @@ use std::time::{SystemTime, Duration};
 use murmel::p2p::{PeerId, P2PControlSender, PeerMessageSender, PeerMessageReceiver, PeerMessage};
 use murmel::timeout::SharedTimeout;
 
-use crate::p2p_biadnet::ExpectedReply;
+use crate::p2p_defiads::ExpectedReply;
 use crate::messages::{PollAddressMessage, Message};
 use crate::error::Error;
 use crate::iblt::{IBLTKey, estimate_diff_size, IBLT, IBLTEntry};
