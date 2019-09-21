@@ -501,7 +501,7 @@ impl<'db> TX<'db> {
     pub fn store_content(&mut self, height: u32, block_id: &sha256d::Hash, c: &Content, amount: u64) -> Result<usize, Error> {
         let id = c.ad.digest();
         let proof = serde_cbor::ser::to_vec(&c.funding).unwrap();
-        let publisher = serde_cbor::ser::to_vec(&c.funder).unwrap();
+        let publisher = c.funder.to_bytes();
         let length = c.length();
         debug!("store content {}", id);
         Ok(self.tx.execute(r#"
