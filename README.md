@@ -104,9 +104,9 @@ curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method"
 
 ```
 Where the first argument is always an API Key which is unique to this installation. You find the API key in the
-defiads.cfg file.  
+defiads.cfg file. In the examples on this page, the API key is "KxNoYPdNXUcN0TvM".  
 
-The second argument is the encryption key for methods that move bitcoins.
+The second argument is the encryption key for methods that move bitcoins. In the examples on this page, the encryption key is "horse battery staple correct".
 
 ### API Methods
 #### categories
