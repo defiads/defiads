@@ -64,7 +64,6 @@ use murmel::p2p::PeerId;
 use std::time::Duration;
 use crate::trunk::Trunk;
 use std::pin::Pin;
-use std::net::IpAddr;
 
 const MAGIC: u32 = 0xB1AD;
 const MAX_PROTOCOL_VERSION: u32 = 1;
@@ -238,7 +237,7 @@ impl P2PBiadNet {
         let mut earlier = HashSet::new();
         let p2p = p2p.clone();
         for addr in &self.peers {
-            earlier.insert(addr.ip());
+            earlier.insert(addr.clone());
             executor.spawn(p2p.add_peer("defiads", PeerSource::Outgoing(addr.clone())).map(|_|())).expect("can not spawn task for peers");
         }
 
@@ -277,7 +276,7 @@ struct KeepConnected {
     cex: ThreadPool,
     dns: Vec<SocketAddr>,
     db: SharedDB,
-    earlier: Arc<Mutex<HashSet<IpAddr>>>,
+    earlier: Arc<Mutex<HashSet<SocketAddr>>>,
     p2p: Arc<P2P<Message, Envelope, BiadnetP2PConfig>>,
     min_connections: usize
 }
@@ -289,20 +288,20 @@ impl Future for KeepConnected {
         if self.p2p.n_connected_peers() < self.min_connections {
             let choice;
             {
-                self.p2p.connected_peers().iter().for_each(|a| {self.earlier.lock().unwrap().insert(a.ip());} );
+                self.p2p.connected_peers().iter().for_each(|a| {self.earlier.lock().unwrap().insert(a.clone());} );
                 choice = self.db.lock().unwrap().transaction().get_an_address("defiads", self.earlier.clone()).expect("can not read addresses from db")
             }
             if let Some(choice) = choice {
-                self.earlier.lock().unwrap().insert(choice.ip());
+                self.earlier.lock().unwrap().insert(choice);
                 let add = self.p2p.add_peer("defiads", PeerSource::Outgoing(choice)).map(|_| ());
                 self.cex.spawn(add).expect("can not add peer for outgoing connection");
             }
             else {
-                let eligible = self.dns.iter().cloned().filter(|a| !self.earlier.lock().unwrap().contains(&a.ip())).collect::<Vec<_>>();
+                let eligible = self.dns.iter().cloned().filter(|a| !self.earlier.lock().unwrap().contains(&a)).collect::<Vec<_>>();
                 if eligible.len() > 0 {
                     let mut rng = thread_rng();
                     let choice = eligible[(rng.next_u32() as usize) % eligible.len()];
-                    self.earlier.lock().unwrap().insert(choice.ip());
+                    self.earlier.lock().unwrap().insert(choice);
                     let add = self.p2p.add_peer("defiads", PeerSource::Outgoing(choice)).map(|_| ());
                     self.cex.spawn(add).expect("can not add peer for outgoing connection");
                 }
