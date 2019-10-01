@@ -49,8 +49,9 @@ $ cargo update
 $ cargo build --release
 ```
 # Run
+note: there is no discovery mechanism implemented yet, so the option `defiads-peers <ADDRESS_OF_PEER1>` must be used to connect to some other peers.
 ```
-$ target/release/defiads
+$ target/release/defiads --defiads-peers <ADDRESS_OF_PEER1>
 ```
 
 Databases and configuration will be stored in $HOME/.defiads/bitcoin or $HOME/.defiads/testnet depending on the 
