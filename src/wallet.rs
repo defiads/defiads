@@ -15,7 +15,7 @@
 //
 use bitcoin::network::constants::Network;
 use bitcoin_hashes::{sha256, sha256d};
-use bitcoin_wallet::account::{MasterAccount, Unlocker, AccountAddressType, Account, MasterKeyEntropy};
+use bitcoin_wallet::account::{MasterAccount, Unlocker, AccountAddressType, Account};
 use bitcoin::util::bip32::ExtendedPubKey;
 use bitcoin::{Block, Transaction, Address, TxIn, Script, TxOut, SigHashType, PublicKey};
 use bitcoin_wallet::proved::ProvedTransaction;
@@ -25,6 +25,8 @@ use rand::{RngCore, thread_rng};
 use bitcoin::consensus::serialize;
 use crate::trunk::Trunk;
 use std::sync::Arc;
+use bitcoin_wallet::mnemonic::Mnemonic;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const KEY_LOOK_AHEAD: u32 = 10;
 const KEY_PURPOSE: u32 = 0xb1ad;
@@ -93,7 +95,7 @@ impl Wallet {
         where W: FnOnce(&PublicKey, Option<u16>) -> Script {
         let network = self.master.master_public().network;
         let mut unlocker = Unlocker::new(
-            self.master.encrypted(), passpharse.as_str(), None,
+            self.master.encrypted(), passpharse.as_str(),
             network, Some(self.master.master_public()))?;
         fee_per_vbyte = std::cmp::min(MAX_FEE_PER_VBYTE, std::cmp::max(MIN_FEE_PER_VBYTE, fee_per_vbyte));
         term = std::cmp::min(MAX_TERM, term);
@@ -156,11 +158,15 @@ impl Wallet {
                 fee = (tx.get_weight() as u64 * fee_per_vbyte + 3)/4;
             }
             else {
-                match tx.verify(|o| coins.iter().find_map(|(p, c, _)| if *p == *o { Some(c.output.clone())} else {None})) {
-                    Ok(()) => debug!("compiled transaction to fund {} fee {}", id, fee),
-                    Err(e) => {
-                        error!("our transaction does not verify {:?} {}", tx, hex::encode(serialize(&tx)));
-                        return Err(Error::Script(e))
+                debug!("compiled transaction to withdraw {} fee {}", amount, fee);
+                #[cfg(feature="bitcoinconsensus")]
+                {
+                    match tx.verify(|o| coins.iter().find_map(|(p, c, _)| if *p == *o { Some(c.output.clone()) } else { None })) {
+                        Ok(()) => {},
+                        Err(e) => {
+                            error!("our transaction does not verify {:?} {}", tx, hex::encode(serialize(&tx)));
+                            return Err(Error::Script(e))
+                        }
                     }
                 }
                 break;
@@ -173,7 +179,7 @@ impl Wallet {
     pub fn withdraw (&mut self, passpharse: String, address: Address, mut fee_per_vbyte: u64, amount: Option<u64>, trunk: Arc<dyn Trunk>) -> Result<(Transaction, u64), Error> {
         let network = self.master.master_public().network;
         let mut unlocker = Unlocker::new(
-            self.master.encrypted(), passpharse.as_str(), None,
+            self.master.encrypted(), passpharse.as_str(),
             network, Some(self.master.master_public()))?;
         let height = trunk.len();
         let balance = self.available_balance(height, |h| trunk.get_height(h));
@@ -229,11 +235,15 @@ impl Wallet {
                 fee = (tx.get_weight() as u64 * fee_per_vbyte + 3)/4;
             }
             else {
-                match tx.verify(|o| coins.iter().find_map(|(p, c, _)| if *p == *o { Some(c.output.clone())} else {None})) {
-                    Ok(()) => debug!("compiled transaction to withdraw {} fee {}", amount, fee),
-                    Err(e) => {
-                        error!("our transaction does not verify {:?} {}", tx, hex::encode(serialize(&tx)));
-                        return Err(Error::Script(e))
+                debug!("compiled transaction to withdraw {} fee {}", amount, fee);
+                #[cfg(feature="bitcoinconsensus")]
+                {
+                    match tx.verify(|o| coins.iter().find_map(|(p, c, _)| if *p == *o { Some(c.output.clone()) } else { None })) {
+                        Ok(()) => {},
+                        Err(e) => {
+                            error!("our transaction does not verify {:?} {}", tx, hex::encode(serialize(&tx)));
+                            return Err(Error::Script(e))
+                        }
                     }
                 }
                 break;
@@ -270,10 +280,13 @@ impl Wallet {
         std::io::stdin().read_line(&mut password).expect("expecting a password");
         password.remove(password.len()-1); // remove EOL
         assert!(password.len() >= 8, "Password should have at least 8 characters");
-        let mut master = MasterAccount::new(MasterKeyEntropy::Recommended, bitcoin_network,
-                                                password.as_str(), None).expect("can not generate wallet");
+        let mut entropy = [0u8;16];
+        thread_rng().fill_bytes(&mut entropy);
+        let mnemonic = Mnemonic::new(&entropy).expect("can not create mnemonic");
+        let mut master = MasterAccount::from_mnemonic(&mnemonic, SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                                                bitcoin_network, password.as_str(), None).expect("can not generate wallet");
         let mut unlocker = Unlocker::new(master.encrypted().as_slice(),
-                                         password.as_str(), None, bitcoin_network,
+                                         password.as_str(), bitcoin_network,
                                          Some(&master.master_public())).expect("Internal error in wallet generation");
         let receiver = Account::new(&mut unlocker, AccountAddressType::P2SHWPKH, 0, 0, KEY_LOOK_AHEAD)
             .expect("can not create receiver account");
@@ -294,7 +307,7 @@ impl Wallet {
         eprintln!("Write down the following human readable key,");
         eprintln!("to evtl. restore your defiads wallet or import into compatible programs and devices.");
         eprintln!();
-        for (i, word) in master.mnemonic(password.as_str()).unwrap().iter().enumerate() {
+        for (i, word) in mnemonic.iter().enumerate() {
             eprintln!("{} {}", i+1, word);
         }
         eprintln!();
@@ -382,7 +395,7 @@ mod test {
             hex::decode("0e05ba48bb0fdc7285dc9498202aeee5e1777ac4f55072b30f15f6a8632ad0f3fde1c41d9e162dbe5d3153282eaebd081cf3b3312336fc56f5dd18a2df6ea48c1cdd11a1ed11281cd2e0f864f02e5bed5ab03326ed24e43b8a184acff9cb4e730db484e33f2b24295a97b2ca87871a69384eb64d4160ce8b3e8b4d90234040970e531d4333a8979dbe533c2b2668bf43b6607b2d24c5b42765ebfdd075fd173c").unwrap().as_slice(),
             ExtendedPubKey::from_str("tpubD6NzVbkrYhZ4XKz4vgwBmnnVmA7EgWhnXvimQ4krq94yUgcSSbroi4uC1xbZ3UGMxG9M2utmaPjdpMrWW2uKRY9Mj4DZWrrY8M4pry8shsK").unwrap(),
             1567260002);
-        let mut unlocker = Unlocker::new_for_master(&wallet.master, PASSPHRASE, None).unwrap();
+        let mut unlocker = Unlocker::new_for_master(&wallet.master, PASSPHRASE).unwrap();
         wallet.master.add_account(Account::new(&mut unlocker, AccountAddressType::P2WPKH, 0, 0, 10).unwrap());
         wallet.master.add_account(Account::new(&mut unlocker, AccountAddressType::P2WPKH, 0, 1, 10).unwrap());
         wallet.master.add_account(Account::new(&mut unlocker, AccountAddressType::P2WSH(4711), 1, 0, 0).unwrap());

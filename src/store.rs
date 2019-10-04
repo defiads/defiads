@@ -492,7 +492,7 @@ mod test {
             hex::decode("0e05ba48bb0fdc7285dc9498202aeee5e1777ac4f55072b30f15f6a8632ad0f3fde1c41d9e162dbe5d3153282eaebd081cf3b3312336fc56f5dd18a2df6ea48c1cdd11a1ed11281cd2e0f864f02e5bed5ab03326ed24e43b8a184acff9cb4e730db484e33f2b24295a97b2ca87871a69384eb64d4160ce8b3e8b4d90234040970e531d4333a8979dbe533c2b2668bf43b6607b2d24c5b42765ebfdd075fd173c").unwrap().as_slice(),
             ExtendedPubKey::from_str("tpubD6NzVbkrYhZ4XKz4vgwBmnnVmA7EgWhnXvimQ4krq94yUgcSSbroi4uC1xbZ3UGMxG9M2utmaPjdpMrWW2uKRY9Mj4DZWrrY8M4pry8shsK").unwrap(),
             1567260002);
-        let mut unlocker = Unlocker::new_for_master(&wallet.master, PASSPHRASE, None).unwrap();
+        let mut unlocker = Unlocker::new_for_master(&wallet.master, PASSPHRASE).unwrap();
         wallet.master.add_account(Account::new(&mut unlocker, AccountAddressType::P2WPKH, 0, 0, 10).unwrap());
         wallet.master.add_account(Account::new(&mut unlocker, AccountAddressType::P2WPKH, 0, 1, 10).unwrap());
         wallet.master.add_account(Account::new(&mut unlocker, AccountAddressType::P2WSH(4711), 1, 0, 0).unwrap());
