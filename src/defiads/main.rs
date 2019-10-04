@@ -84,7 +84,7 @@ pub fn main () {
             .value_name("NETWORK")
             .help("Set the used bitcoin network.")
             .takes_value(true)
-            .possible_values(&["bitcoin", "testnet", "regrest"])
+            .possible_values(&["bitcoin", "testnet", "regtest"])
             .default_value("testnet"))
         .arg(Arg::with_name("bitcoin-connections")
             .value_name("n")
