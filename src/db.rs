@@ -522,7 +522,7 @@ impl<'db> TX<'db> {
             Some(Content {
                 ad: Ad::new(r.get_unwrap(0), r.get_unwrap(1), r.get_unwrap::<usize, String>(2).as_str()),
                 funding: serde_cbor::from_reader(std::io::Cursor::new(r.get_unwrap::<usize, Vec<u8>>(3))).unwrap(),
-                funder: serde_cbor::from_reader(std::io::Cursor::new(r.get_unwrap::<usize, Vec<u8>>(4))).unwrap(),
+                funder: PublicKey::from_slice(r.get_unwrap::<usize, Vec<u8>>(4).as_slice()).unwrap(),
                 term: r.get_unwrap(5)
             })
         ))?)
