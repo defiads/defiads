@@ -24,6 +24,14 @@ You may place ads by performing the following steps, with the below documented J
 3. fund the ad by locking some of the bitcoins to it for a limited term of the advertizement
 4. you may withdraw your coins from the defiads node's wallet after the advertizement expires
 
+## Release notes
+0.2.0 use published crates and remove local dependencies.
+<b>Not backward compatible change to the wallet and header files.</b>
+* withdraw your testnet coins from 0.1.0 if you care them
+* delete all database files in $HOME/.defiads/testnet 
+
+0.1.0 first publication on the dev list 
+
 ## Implementation notes
 defiads connects to both the bitcoin and its own peer-to-peer network. You do not need to run a bitcoin node as
 defiads does only need a small fraction of the information on the bictoin blockchain and retrieves that on its own,
@@ -49,8 +57,9 @@ $ cargo update
 $ cargo build --release
 ```
 # Run
+note: there is no discovery mechanism implemented yet, so the option `defiads-peers <ADDRESS_OF_PEER1>` must be used to connect to some other peers.
 ```
-$ target/release/defiads
+$ target/release/defiads --defiads-peers <ADDRESS_OF_PEER1>
 ```
 
 Databases and configuration will be stored in $HOME/.defiads/bitcoin or $HOME/.defiads/testnet depending on the 
