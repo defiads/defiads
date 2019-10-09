@@ -22,7 +22,7 @@ bitcoin_hashes={version="0.7", features=["serde"]}
 bitcoin={version= "0.21", features=["serde"]}
 secp256k1={version="0.15", features=["serde"]}
 bitcoin-wallet="1.0"
-murmel="0.2"
+murmel="0.2.1"
 siphasher="0.3"
 rand = "0.7"
 rand_distr = "0.2"

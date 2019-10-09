@@ -48,7 +48,7 @@ use murmel::{
 };
 use rand::{RngCore, thread_rng};
 
-use crate::find_peers::seed;
+use crate::find_peers::{seed, BIADNET_PORT};
 use crate::messages::{Message, Envelope, VersionMessage};
 use crate::discovery::{NetAddress, Discovery};
 use crate::updater::Updater;
@@ -237,8 +237,9 @@ impl P2PBiadNet {
         let mut earlier = HashSet::new();
         let p2p = p2p.clone();
         for addr in &self.peers {
-            earlier.insert(addr.clone());
-            executor.spawn(p2p.add_peer("defiads", PeerSource::Outgoing(addr.clone())).map(|_|())).expect("can not spawn task for peers");
+            let socket = SocketAddr::new(addr.ip(), if self.test {BIADNET_PORT + 100} else {BIADNET_PORT});
+            earlier.insert(socket.clone());
+            executor.spawn(p2p.add_peer("defiads", PeerSource::Outgoing(socket)).map(|_|())).expect("can not spawn task for peers");
         }
 
         let dns = seed(self.test);
