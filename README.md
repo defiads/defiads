@@ -25,7 +25,11 @@ You may place ads by performing the following steps, with the below documented J
 4. you may withdraw your coins from the defiads node's wallet after the advertizement expires
 
 ## Release notes
+
+0.2.2 do not ban peers that are slow to answer, just disconnect
+
 0.2.0 use published crates and remove local dependencies.
+
 <b>Not backward compatible change to the wallet and header files.</b>
 * withdraw your testnet coins from 0.1.0 if you care them
 * delete all database files in $HOME/.defiads/testnet 

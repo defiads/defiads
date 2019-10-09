@@ -69,7 +69,7 @@ pub fn main () {
     let biadnet_listen = (BIADNET_LISTEN.to_string() + ":") + (BIADNET_PORT.to_string().as_str());
     let http_rpc = (HTTP_RPC.to_string() + ":") + ((BIADNET_PORT + 1).to_string().as_str());
 
-    let matches = App::new("defiads").version("0.2.1").author("tamas.blummer@protonmail.com")
+    let matches = App::new("defiads").version("0.2.2").author("tamas.blummer@protonmail.com")
         .about("Bitcoin Advertizing Network")
         .arg(Arg::with_name("log-level")
             .long("log-level")
