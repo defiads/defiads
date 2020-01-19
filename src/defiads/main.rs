@@ -243,7 +243,11 @@ pub fn main () {
             ExtendedPubKey::from_str(config.keyroot.as_str()).expect("keyroot is malformed"),
             config.birth
         );
-        assert_eq!(bitcoin_network, master_account.master_public().network);
+        if bitcoin_network == Network::Regtest {
+            assert_eq!(Network::Testnet, master_account.master_public().network);
+        } else {
+            assert_eq!(bitcoin_network, master_account.master_public().network);
+        };
         {
             let mut tx = db.transaction();
             let account = tx.read_account(0, 0, bitcoin_network, config.lookahead).expect("can not read account 0/0");
