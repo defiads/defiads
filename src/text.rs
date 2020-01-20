@@ -28,10 +28,42 @@ pub struct Text {
 }
 
 // default encoding is UTF-8 uncompressed
+// Below are *bits* of the encoding byte.
+// There are thus 4 options:
+// 1. Uncompressed UTF-8
+// 2. Uncompressed UTF-16
+// 3. Compressed UTF-8
+// 4. Compressed UTF-16
 // uses UTF-16 encoding
-const UTF_16:u8 = 1;
+const UTF_16:u8 = 1; // bit 0
 // uses compressed encoding
-const COMPRESSED:u8 = 2;
+const COMPRESSED:u8 = 2; // bit 1
+
+/**
+ * The reason why there are so many encoding options is to allow
+ * similar messages in different languages to be encoded in a similar
+ * number of bytes.
+ * Plain UTF-8 is strongly biased towards English and other European
+ * languages, while taking more bytes, sometimes many more, for
+ * e.g. CJK scripts.
+ * Since the serialization length of the advertisements affects how
+ * they are ranked, using only uncompressed UTF-8 strongly biases
+ * against Asiatic languages.
+ * Originally, ZmnSCPxj proposed the use of SCSU encoding, however
+ * Tamas counter-proposed this alternative encoding and showed
+ * various results with this scheme.
+ * SCSU has the disadvantage of not being a widely-accepted
+ * standard, and thus there are few implementations of it available
+ * out-of-the-box, and thus we would probably have to maintain our
+ * own implementation.
+ * In any case, an entire byte is allocated for the above two flags,
+ * and there is thus room to add even more encodings for text.
+ * The intent is that the encodings "on the wire" are not what is
+ * exposed to applications that this defiads node is talking to;
+ * at higher layers we use UTF-8, but down in the wire level we
+ * use various encodings to reduce data size across multiple
+ * languages.
+ */
 
 impl Text {
     /// create a new text from a string

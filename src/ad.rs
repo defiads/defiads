@@ -23,8 +23,55 @@ use crate::bitcoin_hashes::{sha256, Hash};
 /// An ad, the payload of distributed content
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 pub struct Ad {
+    /**
+     * The category of the advertisement.
+     * This might be a machine-understandable string to identify
+     * the application that uses this category of advertisements
+     * to search for counterparties or services.
+     * For example, a decentralized exchange between
+     * cryptocurrencies might use a category of "exchange", and
+     * automated bots that attempt to do arbitrage could locate
+     * all ads that have this category and contact exchange offers
+     * to attempt trading with them using e.g. cross-chain
+     * atomic swaps.
+     *
+     * The intent is that applications will define a particular
+     * category that service providers of that application will
+     * advertise under.
+     * For example, Lightning Watchtowers might advertise themselves
+     * by specifying a category of "watchtower", then Lightning
+     * nodes could filter ads with that category and parse the
+     * abstract to get the relevant information (e.g. rates charged
+     * for watching, what kinds of channels supported, etc.).
+     */
     pub cat : String,
+    /**
+     * The abstract (i.e. TLDR) of the advertisement.
+     * May contain machine-readable data (JSON or XML or ...)
+     * describing any application-specific data.
+     * For example, an advertising exchange on a decentralized
+     * exchange application might indicate here which pairs it
+     * supports trading and the exchange rate between pairs,
+     * and the mechanical details on how to get in touch with
+     * the advertiser.
+     * As this uses a String it might not be appropriate for
+     * human-readable text in non-Western languages, as
+     * serialization of some non-Western scripts will take
+     * longer.
+     * Thus, this field should be used for machine-readable
+     * data instead.
+     */
     pub abs: String,
+    /**
+     * The content of the advertisement.
+     * This is a human-readable description of the service
+     * or product being advertised.
+     * The specialized Text type is designed to have somewhat
+     * consistent encoding in bytes across different scripts,
+     * so as not to introduce bias against languages which
+     * require many bytes per character when encoded in e.g.
+     * UTF-8.
+     */
     pub content: Text
 }
 
