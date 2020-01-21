@@ -854,7 +854,7 @@ mod test {
             // should not find if banned
             assert!(tx.get_an_address("defiads", Arc::new(Mutex::new(HashSet::new()))).unwrap().is_none());
 
-            let mut master = MasterAccount::new(MasterKeyEntropy::Recommended, Network::Bitcoin, "").unwrap();
+            let mut master = MasterAccount::new(MasterKeyEntropy::Double, Network::Bitcoin, "").unwrap();
             let mut unlocker = Unlocker::new(master.encrypted().as_slice(), "",  Network::Bitcoin, Some(master.master_public())).unwrap();
             let account = Account::new(&mut unlocker, AccountAddressType::P2SHWPKH, 1, 2, 10).unwrap();
             tx.store_account(&account).unwrap();
