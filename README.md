@@ -62,13 +62,13 @@ $ cargo build --release
 ```
 
 # Running On Local Regtest Network (Recommended for developers)
-1. Be sure to have a somewhat recent version of bitcoin core installed.
+1. Be sure to have a somewhat recent version of bitcoin core installed. Importantly, it must be a version which serves BIP 157 blockfilters.
 2. Start bitcoin core in regtest mode `$ bitcoind -regtest -daemon`.
 3. Your local bitcoin instance will now be listening for connections on (default) port 18444
 4. Whenever blocks need to be generated for your testing, you can use the command `$ bitcoin-cli -testnet generatetoaddress <address for mined coins to be sent>`. If you do not know how to use this command, `$ bitcoin-cli help <command>` is your friend. As a reminder, coins mined in block `n` are spendable in block `n+100`.
 5. Now you can run your local defiads node and have it connect to your local regtest network:
 ```
-$ target/release/defiads --bitcoin-network regtest --bitcoin-peers 127.0.0.1:18444
+$ target/release/defiads --bitcoin-discovery OFF --bitcoin-network regtest --bitcoin-peers 127.0.0.1:18444
 ```
 
 # Running On Testnet
@@ -143,7 +143,7 @@ DEFIADS_APIKEY=$(sed -n '/^apikey = /{s/^apikey = //;p}' ~/.defiads/regtest/defi
 #### categories
 Lists the known ad categories. Example call:
 ```
-curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "categories", "params": ["KxNoYPdNXUcN0TvM"], "id":1}' 127.0.0.1:21867
+curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "categories", "params": ['$DEFIADS_APIKEY'], "id":1}' 127.0.0.1:21867
 
 ```
 Example reply
