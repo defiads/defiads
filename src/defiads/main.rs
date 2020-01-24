@@ -60,7 +60,8 @@ struct Config {
     encryptedwalletkey: String,
     keyroot: String,
     lookahead: u32,
-    birth: u64
+    birth: u64,
+    network: Network
 }
 
 pub fn main () {
@@ -243,11 +244,15 @@ pub fn main () {
             ExtendedPubKey::from_str(config.keyroot.as_str()).expect("keyroot is malformed"),
             config.birth
         );
-        if bitcoin_network == Network::Regtest {
+
+        // verify bitcoin-network cli param matches defiads.cfg network and xpub network
+        assert_eq!(bitcoin_network, config.network);
+        if config.network == Network::Regtest {
             assert_eq!(Network::Testnet, master_account.master_public().network);
         } else {
-            assert_eq!(bitcoin_network, master_account.master_public().network);
+            assert_eq!(config.network, master_account.master_public().network);
         };
+
         {
             let mut tx = db.transaction();
             let account = tx.read_account(0, 0, bitcoin_network, config.lookahead).expect("can not read account 0/0");
@@ -269,7 +274,8 @@ pub fn main () {
             encryptedwalletkey: hex::encode(bitcoin_wallet.encrypted().as_slice()),
             keyroot: bitcoin_wallet.master_public().to_string(),
             birth: bitcoin_wallet.birth(),
-            lookahead: KEY_LOOK_AHEAD
+            lookahead: KEY_LOOK_AHEAD,
+            network: bitcoin_network
         };
         {
             let mut tx = db.transaction();
