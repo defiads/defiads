@@ -60,7 +60,18 @@ negotiation and thereby give rise to bitcoin's first truly risk less interest ra
 $ cargo update
 $ cargo build --release
 ```
-# Run
+
+# Running On Local Regtest Network (Recommended for developers)
+1. Be sure to have a somewhat recent version of bitcoin core installed.
+2. Start bitcoin core in regtest mode `$ bitcoind -regtest -daemon`.
+3. Your local bitcoin instance will now be listening for connections on (default) port 18444
+4. Whenever blocks need to be generated for your testing, you can use the command `$ bitcoin-cli -testnet generatetoaddress <address for mined coins to be sent>`. If you do not know how to use this command, `$ bitcoin-cli help <command>` is your friend. As a reminder, coins mined in block `n` are spendable in block `n+100`.
+5. Now you can run your local defiads node and have it connect to your local regtest network:
+```
+$ target/release/defiads --bitcoin-network regtest --bitcoin-peers 127.0.0.1:18444
+```
+
+# Running On Testnet
 note: there is no discovery mechanism implemented yet, so the option `defiads-peers <ADDRESS_OF_PEER1>` must be used to connect to some other peers.
 ```
 $ target/release/defiads --defiads-peers <ADDRESS_OF_PEER1>
@@ -118,9 +129,15 @@ curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method"
 
 ```
 Where the first argument is always an API Key which is unique to this installation. You find the API key in the
-defiads.cfg file. In the examples on this page, the API key is "KxNoYPdNXUcN0TvM".  
+defiads.cfg file.  
 
 The second argument is the encryption key for methods that move bitcoins. In the examples on this page, the encryption key is "horse battery staple correct".
+
+It may be helpful to store the API Key in an environmental variable:
+```
+DEFIADS_APIKEY=$(sed -n '/^apikey = /{s/^apikey = //;p}' ~/.defiads/regtest/defiads.cfg)
+```
+
 
 ### API Methods
 #### categories
@@ -137,7 +154,7 @@ Example reply
 #### list
 Lists the ads within a category. Example call:
 ```
-curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "list", "params": ["KxNoYPdNXUcN0TvM", "misc"], "id":1}' 127.0.0.1:21867
+curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "list", "params": ['$DEFIADS_APIKEY', "misc"], "id":1}' 127.0.0.1:21867
 
 ```
 Example reply
@@ -148,13 +165,13 @@ Example reply
 #### read
 Read an ad
 ```
-curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "read", "params": ["KxNoYPdNXUcN0TvM", "5bb72726e3df5837f2e3496731b22cda904ce08205c6c153037f7b52ebc3d96a"], "id":1}' 127.0.0.1:21867
+curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "read", "params": ['$DEFIADS_APIKEY', "5bb72726e3df5837f2e3496731b22cda904ce08205c6c153037f7b52ebc3d96a"], "id":1}' 127.0.0.1:21867
 
 ```
 #### deposit
 Get a deposit address of the wallet. Transfer some bitcoins to the deposit address to be able to fund ads.
 ```
-curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "deposit", "params": ["KxNoYPdNXUcN0TvM"], "id":1}' 127.0.0.1:21867
+curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "deposit", "params": ['$DEFIADS_APIKEY'], "id":1}' 127.0.0.1:21867
 
 ```
 Example output
@@ -166,7 +183,7 @@ The first number is the confirmed balance the second is the amount available to 
 #### balance
 Query wallet balance in satoshis.
 ```
-curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "balance", "params": ["KxNoYPdNXUcN0TvM"], "id":1}' 127.0.0.1:21867
+curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "balance", "params": ['$DEFIADS_APIKEY'], "id":1}' 127.0.0.1:21867
 
 ```
 Example output
@@ -178,7 +195,7 @@ The first number is the confirmed balance the second is the amount available to 
 #### prepare
 Prepare an ad for publication
 ```
-curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "prepare", "params": ["KxNoYPdNXUcN0TvM","misc","Some abstract","Some text"], "id":1}' 127.0.0.1:21867
+curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "prepare", "params": ['$DEFIADS_APIKEY',"misc","Some abstract","Some text"], "id":1}' 127.0.0.1:21867
 
 ```
 Example output
@@ -190,20 +207,20 @@ The returned is the the new ad's unique id. Use it to refer to it while funding 
 #### list_prepared
 List previously prepared publications.
 ```
-curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "list_prepared", "params": ["KxNoYPdNXUcN0TvM"], "id":1}' 127.0.0.1:21867
+curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "list_prepared", "params": ['$DEFIADS_APIKEY'], "id":1}' 127.0.0.1:21867
 
 ```
 #### read_prepared
 Read previously prepared publications.
 ```
-curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "read_prepared", "params": ["KxNoYPdNXUcN0TvM"], "id":1}' 127.0.0.1:21867
+curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "read_prepared", "params": ['$DEFIADS_APIKEY'], "id":1}' 127.0.0.1:21867
 
 ```
 #### withdraw
 Withdraw bitcoins from the wallet. This is how you withdraw 1 bitcoin while paying 10 satoshis/vbyte fees. If amount is omitted the entire available balance will be withdrawn.
 Provide the wallet encryption passphrase in the second parameter.
 ```
-curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "withdraw", "params": ["KxNoYPdNXUcN0TvM","horse battery staple correct", 10, 100000000], "id":1}' 127.0.0.1:21867
+curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "withdraw", "params": ['$DEFIADS_APIKEY',"horse battery staple correct", 10, 100000000], "id":1}' 127.0.0.1:21867
 
 ```
 Example output. The returned id is the transaction id that was sent to the network.
@@ -214,7 +231,7 @@ Example output. The returned id is the transaction id that was sent to the netwo
 #### fund
 Fund a previously prepared publication. The parameters after the publication id are the amount in satoshis, term of the ad in number of blocks (7 days here), fees in satoshi/vbyte
 ```
-curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "fund", "params": ["KxNoYPdNXUcN0TvM","horse battery staple correct", "5bb72726e3df5837f2e3496731b22cda904ce08205c6c153037f7b52ebc3d96a", 100000000, 1008, 10], "id":1}' 127.0.0.1:21867
+curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "fund", "params": ['$DEFIADS_APIKEY',"horse battery staple correct", "5bb72726e3df5837f2e3496731b22cda904ce08205c6c153037f7b52ebc3d96a", 100000000, 1008, 10], "id":1}' 127.0.0.1:21867
 
 ```
 Example output. The returned id is the transaction id that was sent to the network.
