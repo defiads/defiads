@@ -43,6 +43,7 @@ use std::sync::{Arc,RwLock, Mutex};
 use std::thread;
 use defiads::api::start_api;
 use std::fs;
+use std::path::PathBuf;
 use rand::{thread_rng, RngCore};
 use log_panics;
 use defiads::find_peers::BIADNET_PORT;
@@ -68,6 +69,9 @@ pub fn main () {
 
     let biadnet_listen = (BIADNET_LISTEN.to_string() + ":") + (BIADNET_PORT.to_string().as_str());
     let http_rpc = (HTTP_RPC.to_string() + ":") + ((BIADNET_PORT + 1).to_string().as_str());
+
+    let mut workdir = dirs::home_dir().expect("unknown home directory");
+    workdir.push(".defiads");
 
     let matches = App::new("defiads").version("0.2.2").author("tamas.blummer@protonmail.com")
         .about("Bitcoin Advertizing Network")
@@ -148,6 +152,12 @@ pub fn main () {
             .possible_values(&["ON", "OFF"])
             .case_insensitive(true)
             .default_value("ON"))
+        .arg(Arg::with_name("datadir")
+            .long("datadir")
+            .help("Set the base data directory. defiads.cfg, databases, etc. will be in <bitcoin-netork> subdirectories.")
+            .takes_value(true)
+            .case_insensitive(true)
+            .default_value(workdir.to_str().unwrap()))
         .arg(Arg::with_name("rescan")
             .long("rescan")
             .help("Re-scan blockchain, forget unconfirmed transactions")
@@ -156,8 +166,7 @@ pub fn main () {
 
     let bitcoin_network = matches.value_of("bitcoin-network").unwrap().parse::<Network>().unwrap();
 
-    let mut workdir = dirs::home_dir().expect("unknown home directory");
-    workdir.push(".defiads");
+    let mut workdir = PathBuf::from(matches.value_of("datadir").unwrap());
     workdir.push(bitcoin_network.to_string());
     fs::DirBuilder::new().recursive(true).create(workdir.clone()).expect("can not create work directory");
 
