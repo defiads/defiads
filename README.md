@@ -61,8 +61,8 @@ $ cargo update
 $ cargo build --release
 ```
 
-# Running On Local Regtest Network (Recommended for developers)
-1. Be sure to have a somewhat recent version of bitcoin core installed. Importantly, it must be a version which serves BIP 157 blockfilters.
+# Running On Local Regtest Network
+1. Be sure to have a somewhat recent version of bitcoin core installed. Importantly, it must be a version which serves [BIP 157](https://github.com/bitcoin/bips/blob/master/bip-0157.mediawiki) blockfilters (e.g. [this branch](https://github.com/jimpo/bitcoin/tree/bip157-net))
 2. Start bitcoin core in regtest mode `$ bitcoind -regtest -daemon`.
 3. Your local bitcoin instance will now be listening for connections on (default) port 18444
 4. Whenever blocks need to be generated for your testing, you can use the command `$ bitcoin-cli -testnet generatetoaddress <address for mined coins to be sent>`. If you do not know how to use this command, `$ bitcoin-cli help <command>` is your friend. As a reminder, coins mined in block `n` are spendable in block `n+100`.
