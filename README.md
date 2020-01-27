@@ -92,6 +92,7 @@ OPTIONS:
             Set the used bitcoin network. [default: bitcoin]  [possible values: bitcoin, testnet, regtest]
 
         --bitcoin-peers <ADDRESS>...               Bitcoin network peers to connect
+        --datadir <datadir>                        Set the base data directory. defiads.cfg, databases, etc. will be in <bitcoin-netork> [default: ~/.defiads] subdirectories.
         --http-rpc <ADDRESS>                       Listen to http-rpc on this address. [default: 127.0.0.1:21767]
         --listen <ADDRESS>...                      Listen to incoming defiads connections [default: 0.0.0.0:21766]
         --log-level <LEVEL>
